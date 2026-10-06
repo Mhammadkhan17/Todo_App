@@ -62,6 +62,12 @@ services:
       - GEMINI_BASE_URL=${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-dummy-key-for-development}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-nvidia/nemotron-3-ultra-550b-a55b:free}
+      - OPENROUTER_REFERER=${OPENROUTER_REFERER:-http://localhost:3000}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - RAG_COLLECTION=${RAG_COLLECTION:-todo_documents}
+      - ALLOWED_DOCUMENT_PATH=${ALLOWED_DOCUMENT_PATH:-/app/documents/}
     volumes:
       - ./backend:/home/appuser/app
       - ./backend/src:/home/appuser/app/src
@@ -111,11 +117,9 @@ services:
 
   # Qdrant Vector Database for RAG
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.19.2
     container_name: todo_app_qdrant
     restart: unless-stopped
-    environment:
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-todo_app_qdrant_key}
     volumes:
       - qdrant_data:/qdrant/storage
     ports:
@@ -123,11 +127,6 @@ services:
       - "6334:6334"
     networks:
       - todo_network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:6333/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Redis for caching (optional, for future use)
   redis:

@@ -147,3 +147,7 @@ temp/
 # Neon (local MCP state + config)
 .neon
 neon.ts
+
+# RAG local artifacts
+backend/data/uploads/
+backend/models/**/onnx/

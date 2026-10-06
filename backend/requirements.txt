@@ -30,6 +30,10 @@ langchain-community>=0.3.0
 pypdf>=5.0.0
 docx2txt>=0.8
 unstructured>=0.16.0
+langchain-qdrant>=1.1.0,<2.0
+numpy>=1.26.0
+onnxruntime>=1.19.0
+tokenizers>=0.20.0
 
 # MCP and Agent Dependencies
 openai>=1.10.0
