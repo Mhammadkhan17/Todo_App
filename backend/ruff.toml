@@ -1,0 +1,15 @@
+# Ruff config for the backend (ruff 0.16 defaults otherwise).
+[lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom puts Depends()/Query()/File() in
+# argument defaults; ruff's B008 treats any call in a default as a bug.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.UploadFile",
+]

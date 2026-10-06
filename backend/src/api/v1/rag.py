@@ -1,43 +1,38 @@
 """
 RAG Chatbot API endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-from typing import List, Dict, Optional
-from sqlmodel import Session, select
-from ...dependencies.auth import get_current_user
-from ...models.user import User
-from ...models.rag import Document, ChatSession, ChatMessage
-from ...database.engine import database_engine
-from ...rag.chatbot import RAGChatbot
-from ...rag.ingest import DocumentIngestor
-from ...agents.todo_agent import process_natural_language_command
-import tempfile
 import os
 import uuid
-from datetime import datetime
-import re
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlmodel import Session, select
+
+from ...agents.todo_agent import process_natural_language_command
+from ...database.session import get_session
+from ...dependencies.auth import get_current_user
+from ...models.rag import ChatMessage, ChatSession, Document
+from ...models.user import User
+from ...rag.chatbot import RAGChatbot
+from ...rag.ingest import DocumentIngestor
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None  # If provided, continue existing session
-    user_id: Optional[str] = None
+    session_id: str | None = None  # If provided, continue existing session
+    user_id: str | None = None
 
 class ChatResponse(BaseModel):
     response: str
-    sources: List[Dict]
+    sources: list[dict]
     query: str
     session_id: str
-
-class DocumentUploadRequest(BaseModel):
-    file_urls: List[str]
 
 class DocumentIndexResponse(BaseModel):
     success: bool
     message: str
-    indexed_count: Optional[int] = None
+    indexed_count: int | None = None
 
 class CreateSessionRequest(BaseModel):
     title: str
@@ -46,9 +41,16 @@ class CreateSessionResponse(BaseModel):
     session_id: str
     title: str
 
-# Global instances for now (in production, consider dependency injection)
-chatbot = RAGChatbot()
-ingestor = DocumentIngestor()
+MAX_FILE_SIZE = 10 * 1024 * 1024
+ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
+
+
+def get_chatbot() -> RAGChatbot:
+    return RAGChatbot()
+
+
+def get_ingestor() -> DocumentIngestor:
+    return DocumentIngestor()
 
 
 def detect_intent(message: str) -> str:
@@ -110,7 +112,9 @@ def detect_intent(message: str) -> str:
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_rag(
     request: ChatRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+    bot: RAGChatbot = Depends(get_chatbot),
 ):
     """
     Chat with the RAG-enabled bot that can handle both document queries and task management
@@ -153,44 +157,43 @@ async def chat_with_rag(
             }
         else:
             # Process as document query using RAG
-            response = chatbot.generate_response(request.message, current_user.id)
+            response = bot.generate_response(request.message, str(current_user.id))
 
         # Store the conversation in the database
-        with database_engine.get_session() as db:
-            # Create chat message entry
-            chat_message = ChatMessage(
-                session_id=session_id,
-                user_id=current_user.id,
-                role="user",
-                content=request.message
+        # Create chat message entry
+        chat_message = ChatMessage(
+            session_id=session_id,
+            user_id=str(current_user.id),
+            role="user",
+            content=request.message
+        )
+        db.add(chat_message)
+
+        # Create assistant response entry
+        assistant_message = ChatMessage(
+            session_id=session_id,
+            user_id=str(current_user.id),
+            role="assistant",
+            content=response["response"],
+            sources=response.get("sources", [])
+        )
+        db.add(assistant_message)
+
+        # Create session if it doesn't exist
+        existing_session = db.exec(
+            select(ChatSession).where(ChatSession.id == session_id)
+        ).first()
+
+        if not existing_session:
+            session_title = request.message[:50] + "..." if len(request.message) > 50 else request.message
+            chat_session = ChatSession(
+                id=session_id,
+                user_id=str(current_user.id),
+                title=session_title
             )
-            db.add(chat_message)
+            db.add(chat_session)
 
-            # Create assistant response entry
-            assistant_message = ChatMessage(
-                session_id=session_id,
-                user_id=current_user.id,
-                role="assistant",
-                content=response["response"],
-                sources=response.get("sources", [])
-            )
-            db.add(assistant_message)
-
-            # Create session if it doesn't exist
-            existing_session = db.exec(
-                select(ChatSession).where(ChatSession.id == session_id)
-            ).first()
-
-            if not existing_session:
-                session_title = request.message[:50] + "..." if len(request.message) > 50 else request.message
-                chat_session = ChatSession(
-                    id=session_id,
-                    user_id=current_user.id,
-                    title=session_title
-                )
-                db.add(chat_session)
-
-            db.commit()
+        db.commit()
 
         return ChatResponse(
             response=response["response"],
@@ -205,7 +208,8 @@ async def chat_with_rag(
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_chat_session(
     request: CreateSessionRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
 ):
     """
     Create a new chat session
@@ -213,14 +217,13 @@ async def create_chat_session(
     try:
         session_id = str(uuid.uuid4())
 
-        with database_engine.get_session() as db:
-            chat_session = ChatSession(
-                id=session_id,
-                user_id=current_user.id,
-                title=request.title
-            )
-            db.add(chat_session)
-            db.commit()
+        chat_session = ChatSession(
+            id=session_id,
+            user_id=str(current_user.id),
+            title=request.title
+        )
+        db.add(chat_session)
+        db.commit()
 
         return CreateSessionResponse(session_id=session_id, title=request.title)
     except Exception as e:
@@ -228,17 +231,19 @@ async def create_chat_session(
 
 
 @router.get("/sessions")
-async def list_chat_sessions(current_user: User = Depends(get_current_user)):
+async def list_chat_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
     """
     List all chat sessions for the user
     """
     try:
-        with database_engine.get_session() as db:
-            sessions = db.exec(
-                select(ChatSession)
-                .where(ChatSession.user_id == current_user.id)
-                .order_by(ChatSession.created_at.desc())
-            ).all()
+        sessions = db.exec(
+            select(ChatSession)
+            .where(ChatSession.user_id == str(current_user.id))
+            .order_by(ChatSession.created_at.desc())
+        ).all()
 
         return {"sessions": sessions}
     except Exception as e:
@@ -248,28 +253,28 @@ async def list_chat_sessions(current_user: User = Depends(get_current_user)):
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(
     session_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
 ):
     """
     Get all messages for a specific session
     """
     try:
-        with database_engine.get_session() as db:
-            # Verify user owns the session
-            session = db.exec(
-                select(ChatSession)
-                .where(ChatSession.id == session_id)
-                .where(ChatSession.user_id == current_user.id)
-            ).first()
+        # Verify user owns the session
+        session = db.exec(
+            select(ChatSession)
+            .where(ChatSession.id == session_id)
+            .where(ChatSession.user_id == str(current_user.id))
+        ).first()
 
-            if not session:
-                raise HTTPException(status_code=404, detail="Session not found")
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-            messages = db.exec(
-                select(ChatMessage)
-                .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
-            ).all()
+        messages = db.exec(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.asc())
+        ).all()
 
         return {"messages": messages}
     except Exception as e:
@@ -278,33 +283,56 @@ async def get_session_messages(
 
 @router.post("/upload-and-index")
 async def upload_and_index_documents(
-    request: DocumentUploadRequest,
+    files: list[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
-    background_tasks: BackgroundTasks = None
+    db: Session = Depends(get_session),
+    ingestor: DocumentIngestor = Depends(get_ingestor),
 ):
     """
-    Upload and index documents for RAG
+    Upload documents and index them into the user's Qdrant collection.
     """
     try:
-        # In a real implementation, you'd download files from URLs
-        # For now, we'll simulate the process
-        # This is a simplified version - in reality, you'd need to handle file downloads securely
+        payloads: list[tuple[str, bytes]] = []
+        rejected = 0
+        for upload in files:
+            ext = os.path.splitext(upload.filename or "")[1].lower()
+            if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+                rejected += 1
+                continue
+            content = await upload.read()
+            if len(content) > MAX_FILE_SIZE:
+                rejected += 1
+                continue
+            payloads.append((upload.filename or "unnamed", content))
 
-        # Simulate indexing process
-        # For demo purposes, we'll just return success
+        if not payloads:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid files. Supported: PDF, TXT, MD, DOCX (max 10MB each).",
+            )
+
+        result = ingestor.ingest_upload(db, str(current_user.id), payloads)
         return DocumentIndexResponse(
-            success=True,
-            message=f"Started indexing {len(request.file_urls)} documents",
-            indexed_count=len(request.file_urls)
+            success=result.failed == 0,
+            message=(
+                f"Indexed {result.indexed}, skipped {result.skipped}, "
+                f"failed {result.failed}"
+                + (f" ({'; '.join(result.errors[:3])})" if result.errors else "")
+            ),
+            indexed_count=result.indexed + result.skipped,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/index-local-files")
 async def index_local_files(
-    file_paths: List[str],
-    current_user: User = Depends(get_current_user)
+    file_paths: list[str],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+    ingestor: DocumentIngestor = Depends(get_ingestor),
 ):
     """
     Index locally accessible files
@@ -322,40 +350,14 @@ async def index_local_files(
             else:
                 raise HTTPException(status_code=403, detail=f"Access denied to path: {path}")
 
-        success = ingestor.index_documents(safe_paths)
-        if success:
-            # Store document info in database
-            with database_engine.get_session() as db:
-                for path in safe_paths:
-                    import hashlib
-                    with open(path, 'rb') as f:
-                        file_hash = hashlib.sha256(f.read()).hexdigest()
-
-                    document = Document(
-                        user_id=current_user.id,
-                        filename=os.path.basename(path),
-                        original_filename=os.path.basename(path),
-                        file_path=path,
-                        file_size=os.path.getsize(path),
-                        mime_type="application/octet-stream",  # Should determine actual MIME type
-                        hash=file_hash,
-                        status="indexed"
-                    )
-                    db.add(document)
-
-                db.commit()
-
-            return DocumentIndexResponse(
-                success=True,
-                message=f"Successfully indexed {len(safe_paths)} files",
-                indexed_count=len(safe_paths)
-            )
-        else:
-            return DocumentIndexResponse(
-                success=False,
-                message="Failed to index documents",
-                indexed_count=0
-            )
+        result = ingestor.ingest_paths(db, str(current_user.id), safe_paths)
+        return DocumentIndexResponse(
+            success=result.failed == 0,
+            message=f"Indexed {result.indexed}, failed {result.failed}",
+            indexed_count=result.indexed + result.skipped,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -364,30 +366,33 @@ async def index_local_files(
 async def search_documents(
     query: str,
     k: int = 5,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    bot: RAGChatbot = Depends(get_chatbot),
 ):
     """
-    Search for documents similar to the query
+    Search for documents similar to the query (current user's corpus only).
     """
     try:
-        results = chatbot.search_similar(query, k=k)
+        results = bot.search_similar(query, str(current_user.id), k=k)
         return {"results": results, "query": query}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/documents")
-async def list_user_documents(current_user: User = Depends(get_current_user)):
+async def list_user_documents(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
     """
     List all documents uploaded by the user
     """
     try:
-        with database_engine.get_session() as db:
-            documents = db.exec(
-                select(Document)
-                .where(Document.user_id == current_user.id)
-                .order_by(Document.created_at.desc())
-            ).all()
+        documents = db.exec(
+            select(Document)
+            .where(Document.user_id == str(current_user.id))
+            .order_by(Document.created_at.desc())
+        ).all()
 
         return {"documents": documents}
     except Exception as e:
@@ -395,24 +400,20 @@ async def list_user_documents(current_user: User = Depends(get_current_user)):
 
 
 @router.delete("/reset-index")
-async def reset_rag_index(current_user: User = Depends(get_current_user)):
+async def reset_rag_index(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+    ingestor: DocumentIngestor = Depends(get_ingestor),
+):
     """
-    Reset the entire RAG index (admin only)
+    Reset the current user's RAG index and document rows.
     """
     try:
-        # Check if user is admin (simplified check)
-        # In real implementation, check proper role-based access
-        is_admin = current_user.email.endswith("@admin.com") or os.getenv("ADMIN_USER_ID") == current_user.id
-
-        if not is_admin:
-            raise HTTPException(status_code=403, detail="Admin access required")
-
-        success = ingestor.delete_collection()
-        if success:
-            # Recreate the collection
-            ingestor = DocumentIngestor()  # This will recreate the collection
-            return {"success": True, "message": "RAG index reset successfully"}
-        else:
-            return {"success": False, "message": "Failed to reset RAG index"}
+        user_id = str(current_user.id)
+        deleted = ingestor.reset_user(db, user_id)
+        return {
+            "success": True,
+            "message": f"Removed {deleted} indexed chunks and document records for user {user_id}",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

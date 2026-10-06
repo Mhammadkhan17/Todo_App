@@ -2112,12 +2112,23 @@ def test_session_crud_smoke(client, auth_headers):
 
 **Note:** `/chat` tests exercise the storage path — the `db` param hits the overridden session, and `str(current_user.id)` keeps the str-typed `user_id` columns happy. `detect_intent("what does the report say about budgets?")` → `document_query` (`what does` ✓); `detect_intent("list my tasks")` → `task_management` ✓. The task test monkeypatches `process_natural_language_command` so it never depends on the real agent's internals (the endpoint's `except` would otherwise mask a 500).
 
+### Execution notes (as built)
+
+Deviations made while executing — all verified by the gates below:
+
+1. **`backend/ruff.toml` (new):** `[lint.flake8-bugbear] extend-immutable-calls` for FastAPI's `Depends()/Query()/File()` defaults. Without it B008 flagged 23 instances in `rag.py` (baseline had 9). With it: `rag.py` ruff errors go 35 → 9 (only baseline-equivalent `BLE001`), repo-wide 483 → 406.
+2. **Test snippet needed `import pytest`** (omitted from the plan's copy-paste) — added.
+3. **`tests/rag/conftest.py`:** added autouse `_clear_rag_rows` (session-scoped DB is shared across test files; `len(documents) == 1` assertions need a clean table per test — users are kept), `_REGISTERED` cache so `register` runs once per session (duplicate email → 409 on later tests), and unique creds `raguser/rag@example.com` (rag tests run before `test_auth.py` alphabetically and would steal `test@example.com`, turning `test_register_user` into a new 400 failure).
+4. **Root `tests/conftest.py`:** `override_get_session` now yields a `sqlmodel.Session` (routes call `.exec`, plain sessionmaker lacks it); removed dead `TestingSessionLocal`.
+5. **`/index-local-files`:** `except HTTPException: raise` added before the generic handler — the in-loop `raise HTTPException(403)` for disallowed paths was previously swallowed by `except Exception` and surfaced as 500.
+
 ### Verification + commit
 
 ```bash
-cd backend && .venv/bin/python -m pytest tests/rag -q          # all RAG tests green
-cd backend && .venv/bin/python -m pytest tests -q              # same 10 pre-existing failures only
-git add backend/src/api/v1/rag.py backend/tests/rag && git commit -m "feat: wire rag routes to real ingestor/chatbot with per-user scoping"
+cd backend && .venv/bin/python -m pytest tests/rag -q          # 43 passed, 2 skipped
+cd backend && .venv/bin/python -m pytest tests -q              # same 10 pre-existing failures only (57 passed)
+cd backend && .venv/bin/python -m ruff check src/api/v1/rag.py tests/rag/test_rag_routes.py  # only baseline BLE001 left in rag.py; test file clean
+git add backend/src/api/v1/rag.py backend/tests backend/ruff.toml docs/superpowers/plans/2026-10-06-rag-subsystem.md && git commit -m "feat: wire rag routes to real ingestor/chatbot with per-user scoping"
 ```
 
 ---

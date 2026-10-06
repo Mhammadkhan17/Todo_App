@@ -10,8 +10,8 @@ import tempfile
 import os
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Session
 
 from main import app
 from src.database.engine import database_engine
@@ -45,7 +45,6 @@ def test_db():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
     # Create tables
     User.metadata.create_all(bind=test_engine)
@@ -62,8 +61,9 @@ def test_db():
 def client(test_db):
     """Create a test client."""
     def override_get_session():
+        # sqlmodel.Session (adds .exec) — routes call db.exec(...)
         try:
-            session = sessionmaker(autocommit=False, autoflush=False, bind=test_db)()
+            session = Session(bind=test_db)
             yield session
         finally:
             session.close()
