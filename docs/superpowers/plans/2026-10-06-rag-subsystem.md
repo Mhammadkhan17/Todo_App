@@ -2258,7 +2258,7 @@ git add README.md && git commit -m "docs: RAG subsystem status, setup, and limit
 ## Final acceptance
 
 - [ ] `cd backend && .venv/bin/python -m pytest tests -q` → only the 10 documented pre-existing failures; `tests/rag/` fully green (45 tests; the 2 model-dependent embedding tests skip until you run the pip install + fetch, then pass).
-- [ ] `cd backend && .venv/bin/python -m ruff check src tests && .venv/bin/python -m black --check src tests` → clean for touched files.
+- [ ] Lint gate (repo baseline discovered at execution: 483 default-ruff errors, 46 black-unformatted files): every file NEW to this plan is fully `ruff check` + `black --check` clean; pre-existing touched files (`chat_router.py`, `tests/conftest.py`, `src/api/v1/rag.py`, …) must have **zero new ruff violations** vs the baseline commit (`git show f776745:<file> | ruff check --stdin-filename <file> -`). Command: `cd backend && .venv/bin/python -m ruff check src tests`.
 - [ ] `cd frontend && npm run lint` → clean.
 - [ ] Compose parses; qdrant pinned `v1.19.2`; backend env carries `QDRANT_URL=http://qdrant:6333`.
 - [ ] E2E checklist run against the live Docker stack: upload → search → chat with sources (needs your OpenRouter key; without it the graceful mock) → cross-user isolation.
