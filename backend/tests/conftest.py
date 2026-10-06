@@ -11,6 +11,7 @@ import os
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from main import app
 from src.database.engine import database_engine
@@ -18,12 +19,32 @@ from src.database.session import get_session
 from src.models import User, Task
 
 
+def _allow_testclient_host() -> None:
+    """Dev TrustedHostMiddleware rejects TestClient's 'testserver' host."""
+    from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+    for middleware in app.user_middleware:
+        if getattr(middleware, "cls", None) is TrustedHostMiddleware:
+            options = getattr(middleware, "kwargs", None) or getattr(middleware, "options", None)
+            if options is not None:
+                options["allowed_hosts"] = ["testserver", "localhost", "127.0.0.1", "0.0.0.0"]
+
+
+_allow_testclient_host()
+
+
 # Create test database
 @pytest.fixture(scope="session")
 def test_db():
     """Create a test database."""
-    # Use in-memory SQLite for tests
-    test_engine = create_engine("sqlite:///:memory:", echo=False)
+    # SingletonThreadPool gives each thread its own empty :memory: DB;
+    # StaticPool shares one connection so the app thread sees the same tables.
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
     # Create tables
