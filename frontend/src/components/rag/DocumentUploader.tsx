@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Upload, File, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface FileWithPreview extends File {
   preview?: string;
@@ -18,12 +19,13 @@ const DocumentUploader = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const { token, isAuthenticated } = useAuth();
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     // Filter accepted file types
     const validFiles = acceptedFiles.filter(file => {
       const ext = file.name.split('.').pop()?.toLowerCase();
-      return ['pdf', 'txt', 'md', 'docx', 'doc'].includes(ext || '');
+      return ['pdf', 'txt', 'md', 'markdown', 'docx'].includes(ext || '');
     });
 
     if (validFiles.length !== acceptedFiles.length) {
@@ -41,8 +43,7 @@ const DocumentUploader = () => {
       'application/pdf': ['.pdf'],
       'text/plain': ['.txt'],
       'text/markdown': ['.md', '.markdown'],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'application/msword': ['.doc']
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
     },
     maxSize: 10 * 1024 * 1024, // 10MB
   });
@@ -79,10 +80,8 @@ const DocumentUploader = () => {
       const response = await fetch('/api/rag/upload-and-index', {
         method: 'POST',
         body: formData,
-        headers: {
-          // Note: Don't include Content-Type header when using FormData
-          // The browser will set it automatically with the boundary
-        },
+        // Don't include Content-Type — the browser sets the FormData boundary
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
       if (!response.ok) {
@@ -118,7 +117,6 @@ const DocumentUploader = () => {
     { ext: '.txt', desc: 'Plain Text Files' },
     { ext: '.md', desc: 'Markdown Files' },
     { ext: '.docx', desc: 'Word Documents' },
-    { ext: '.doc', desc: 'Legacy Word Documents' },
   ];
 
   return (
@@ -148,7 +146,7 @@ const DocumentUploader = () => {
             or click to browse
           </p>
           <p className="text-xs text-muted-foreground">
-            Supported formats: PDF, TXT, MD, DOCX, DOC (Max 10MB per file)
+            Supported formats: PDF, TXT, MD, DOCX (Max 10MB per file)
           </p>
         </div>
 
@@ -213,7 +211,7 @@ const DocumentUploader = () => {
         <div className="flex flex-wrap gap-3 mt-6">
           <Button
             onClick={uploadFiles}
-            disabled={files.length === 0 || isUploading}
+            disabled={files.length === 0 || isUploading || !isAuthenticated}
             className="flex items-center gap-2"
           >
             <Upload className="h-4 w-4" />
@@ -232,7 +230,7 @@ const DocumentUploader = () => {
         {/* Supported formats */}
         <div className="mt-6 pt-4 border-t">
           <h4 className="font-medium mb-2">Supported Formats</h4>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {supportedFormats.map((format, index) => (
               <Badge key={index} variant="secondary" className="justify-center">
                 {format.ext}
