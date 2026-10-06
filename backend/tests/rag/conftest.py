@@ -2,8 +2,7 @@
 
 import pytest
 from qdrant_client import QdrantClient
-from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel
+from sqlmodel import Session, SQLModel
 
 import src.models.rag  # noqa: F401  register Document/ChatSession/ChatMessage on SQLModel.metadata
 from src.auth.jwt_service import JWTService
@@ -29,7 +28,8 @@ def qdrant_client():
 
 @pytest.fixture
 def db_session(test_db):
-    session = sessionmaker(autocommit=False, autoflush=False, bind=test_db)()
+    # sqlmodel.Session (adds .exec); plain sqlalchemy sessionmaker lacks it
+    session = Session(bind=test_db)
     yield session
     session.close()
 

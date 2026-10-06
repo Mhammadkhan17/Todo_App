@@ -156,13 +156,14 @@ _allow_testclient_host()
 """Shared fixtures for RAG tests: DB tables, in-memory Qdrant, auth helpers."""
 import pytest
 from qdrant_client import QdrantClient
-from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel
+from sqlmodel import Session, SQLModel
 
 from src.auth.jwt_service import JWTService
-from src.rag.store import reset_singletons
 
 import src.models.rag  # noqa: F401  register Document/ChatSession/ChatMessage on SQLModel.metadata
+
+# (execution note: `from src.rag.store import reset_singletons` + the autouse
+#  _reset_store_singletons fixture are added in Task 6, when store.py exists)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -170,6 +171,7 @@ def _rag_tables(test_db):
     SQLModel.metadata.create_all(bind=test_db)
 
 
+# added in Task 6 (needs src/rag/store.py to exist):
 @pytest.fixture(autouse=True)
 def _reset_store_singletons():
     reset_singletons()
@@ -184,7 +186,8 @@ def qdrant_client():
 
 @pytest.fixture
 def db_session(test_db):
-    session = sessionmaker(autocommit=False, autoflush=False, bind=test_db)()
+    # sqlmodel.Session (adds .exec); plain sqlalchemy sessionmaker lacks it
+    session = Session(bind=test_db)
     yield session
     session.close()
 
@@ -1344,14 +1347,17 @@ import pytest
 from src.rag.ingest import ALLOWED_EXTENSIONS, DocumentIngestor, extract_text
 from tests.rag.in_memory import FakeEmbedder
 
+# Valid minimal PDF with correct xref offsets (verified against installed pypdf 6.19.0)
 MINI_PDF = (
-    b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
-    b"/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n"
-    b"4 0 obj<</Length 44>>stream\nBT /F1 24 Tf 72 720 Td (Hello RAG world) Tj ET\n"
-    b"endstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
-    b"trailer<</Root 1 0 R>>\n%%EOF\n"
+    b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+    b"/Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+    b"4 0 obj\n<< /Length 46 >>\nstream\nBT /F1 24 Tf 72 720 Td (Hello RAG world) Tj ET\n"
+    b"endstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\n"
+    b"endobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n"
+    b"0000000115 00000 n \n0000000241 00000 n \n0000000337 00000 n \n"
+    b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n407\n%%EOF\n"
 )
 
 
