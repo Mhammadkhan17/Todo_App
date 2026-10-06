@@ -1,12 +1,12 @@
 """Shared fixtures for RAG tests: DB tables, in-memory Qdrant, auth helpers."""
+
 import pytest
 from qdrant_client import QdrantClient
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
-from src.auth.jwt_service import JWTService
-
 import src.models.rag  # noqa: F401  register Document/ChatSession/ChatMessage on SQLModel.metadata
+from src.auth.jwt_service import JWTService
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -26,7 +26,9 @@ def db_session(test_db):
     session.close()
 
 
-def _register(client, *, username, email, password="testpassword123", full_name="Test User"):
+def _register(
+    client, *, username, email, password="testpassword123", full_name="Test User"
+):
     response = client.post(
         "/api/register",
         json={
