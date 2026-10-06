@@ -1,44 +1,38 @@
-"""
-Simple RAG Chatbot Implementation
-This is a placeholder until full langchain dependencies are available.
-"""
-from typing import Dict, Any, List
+"""RAG chatbot facade: per-user cached chains + direct similarity search."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from .chain import _search_kwargs, create_rag_chain, hits_to_sources
 
 
 class RAGChatbot:
-    """Simple RAG chatbot implementation."""
+    def __init__(self, *, store=None, chain_factory=None):
+        self._store = store
+        self._chain_factory = chain_factory
+        self._chains: dict[str, Callable[[str], dict]] = {}
 
-    def __init__(self):
-        """Initialize the RAG chatbot."""
-        pass
+    def _chain(self, user_id: str) -> Callable[[str], dict]:
+        user_id = str(user_id)
+        if user_id not in self._chains:
+            factory = self._chain_factory or create_rag_chain
+            kwargs = {"store": self._store} if self._store is not None else {}
+            self._chains[user_id] = factory(user_id, **kwargs)
+        return self._chains[user_id]
 
-    def generate_response(self, query: str, user_id: str) -> Dict[str, Any]:
-        """
-        Generate a response to the user's query.
+    def generate_response(self, query: str, user_id: str) -> dict[str, Any]:
+        return self._chain(user_id)(query)
 
-        Args:
-            query: The user's query
-            user_id: The ID of the user
+    def search_similar(
+        self, query: str, user_id: str, k: int = 5
+    ) -> list[dict[str, Any]]:
+        if self._store is None:
+            from .store import get_vectorstore
 
-        Returns:
-            Dictionary with response and sources
-        """
-        # For now, return a simple response
-        return {
-            "response": f"I received your query: '{query}'. This is a placeholder response until full RAG functionality is implemented.",
-            "sources": []
-        }
-
-    def search_similar(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """
-        Search for documents similar to the query.
-
-        Args:
-            query: The query to search for
-            k: Number of results to return
-
-        Returns:
-            List of similar documents
-        """
-        # For now, return empty results
-        return []
+            self._store = get_vectorstore()
+        hits = self._store.similarity_search_with_score(
+            query, **_search_kwargs(user_id, k)
+        )
+        return hits_to_sources(hits)

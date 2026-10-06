@@ -11,4 +11,4 @@ This module provides:
 from .chatbot import RAGChatbot
 from .ingest import DocumentIngestor
 
-__all__ = ["RAGChatbot", "DocumentIngestor"]
+__all__ = ["DocumentIngestor", "RAGChatbot"]
