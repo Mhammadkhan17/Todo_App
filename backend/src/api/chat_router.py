@@ -15,8 +15,8 @@ import uuid
 from datetime import datetime
 import json
 import openai
-import os
 from dotenv import load_dotenv
+from ..llm.provider import resolve_llm
 
 load_dotenv()
 
@@ -94,16 +94,8 @@ async def process_with_openai_and_mcp(user_id: str, message: str, history: List[
     """
     try:
         # Get AI configuration
-        ai_provider = os.getenv("AI_PROVIDER", "openai").lower()
-        
-        if ai_provider == "gemini":
-            api_key = os.getenv("GEMINI_API_KEY")
-            base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-            model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-        else:
-            api_key = os.getenv("OPENAI_API_KEY")
-            base_url = None  # Use default OpenAI base URL
-            model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+        cfg = resolve_llm()
+        ai_provider, api_key, model = cfg.provider, cfg.api_key, cfg.model
 
         if not api_key or api_key == "sk-dummy-key-for-development":
             # Return a mock response if using dummy API key
@@ -114,7 +106,7 @@ async def process_with_openai_and_mcp(user_id: str, message: str, history: List[
             }
 
         # Initialize OpenAI-compatible client
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        client = openai.OpenAI(api_key=api_key, base_url=cfg.base_url, default_headers=cfg.default_headers or None)
 
         # Prepare the tools for function calling
         tools = [
