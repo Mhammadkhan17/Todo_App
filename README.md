@@ -1,8 +1,6 @@
 # Todo_App
 
-**TodoFlow** — a full-stack task-management application with JWT authentication, statistics dashboards, and an AI chat assistant, built with FastAPI and Next.js for developers who want a production-shaped reference project to review, run, and contribute to.
-
-> **Status:** production-shaped MVP — auth, tasks, statistics, dashboard, and AI chat are real and runnable today; Redis and migration tooling are not finished. See [Known Limitations](#known-limitations).
+**TodoFlow** — a full-stack task-management application with JWT authentication, statistics dashboards, an AI chat assistant, and RAG chat over your own uploaded documents, built with FastAPI and Next.js for developers who want a production-shaped reference project to review, run, and contribute to.
 
 ## Table of Contents
 
@@ -15,8 +13,6 @@
 - [Testing & Linting](#testing--linting)
 - [Troubleshooting](#troubleshooting)
 - [Project Structure](#project-structure)
-- [Known Limitations](#known-limitations)
-- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -27,6 +23,7 @@
 - **Statistics** — per-user totals, active/completed/overdue counts, priority breakdown, and completion rate.
 - **Dashboard** — filter tabs (all/pending/completed), search, sorting, recent activity, and an inline task form.
 - **AI chat assistant** — LLM function-calling over task tools (`add_task`, `list_tasks`, `complete_task`, `delete_task`, `update_task`), embedded as a widget on every main page; replies gracefully with a "not configured" message when no AI provider key is set.
+- **RAG document chat** — upload PDF/TXT/MD/DOCX (≤ 10 MB), chunked and embedded with a local ONNX MiniLM-L6-v2 model, indexed per-user in Qdrant, with grounded answers and `{file_name, score}` sources on the `/chat` page.
 - **MCP server** — the same five tools exposed over stdio for use with MCP-compatible clients.
 - **Security middleware** — rate limiting, security headers, CORS controls, input validation, trusted-host checks, and custom exception handlers.
 - **UI** — light/dark/system themes, animated transitions, and an accessibility panel (font scaling, high contrast, reduced motion).
@@ -67,13 +64,15 @@ Next.js frontend (:3000)          — auth context, route guards, SSR pages
   ▼
 FastAPI backend (:8000)           — routers, security middleware, JWT deps
   │
-  ├──► PostgreSQL 16 (:5432)      — users, tasks (SQLModel)
-  └──► AI provider                — Gemini or OpenAI via LangChain (optional)
+  ├──► PostgreSQL / Neon          — users, tasks, chat sessions (SQLModel)
+  ├──► Qdrant (:6333)             — per-user document vectors (384-d MiniLM)
+  └──► AI provider                — openai | gemini | openrouter via LangChain (optional)
 ```
 
 - Routers are mounted under `/api` in `backend/main.py`; OpenAPI docs are served at `/api/docs`.
+- RAG pipeline: upload → extract (pypdf/text) → chunk (1000/200) → ONNX embed → Qdrant upsert with `metadata.user_id`; chat retrieves the top-5 chunks filtered by the caller's user id and answers from a grounded prompt.
 - Frontend route protection lives in `frontend/src/proxy.ts` (middleware) plus `ProtectedRoute` components.
-- Tables are created automatically at startup; there is no migration directory yet (see [Known Limitations](#known-limitations)).
+- Tables are created automatically at startup; there is no migration directory yet.
 
 ## Quickstart
 
@@ -127,7 +126,24 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run dev
 
 App: <http://localhost:3000>
 
-> **Note:** the full Docker dev stack (`docker-compose build backend`) currently fails because of a build-target mismatch — see [Known Limitations](#known-limitations). Running the two apps locally as above is the supported path today.
+### 6. Enable RAG (optional)
+
+```bash
+# vector store
+docker compose up -d qdrant
+
+# local embedding model (~90 MB ONNX weights, tokenizer committed)
+backend/.venv/bin/python scripts/fetch_embeddings_model.py
+
+# .env: pick one provider
+#   AI_PROVIDER=openrouter  +  OPENROUTER_API_KEY=...   (free tier works)
+#   AI_PROVIDER=gemini      +  GEMINI_API_KEY=...
+#   AI_PROVIDER=openai      +  OPENAI_API_KEY=...
+```
+
+Without an AI provider key, RAG endpoints still index and search documents but chat returns a graceful "not configured" reply. Without the fetched model, upload indexing fails and the two embedding tests skip.
+
+> **Note:** the full Docker dev stack (`docker-compose build backend`) currently fails because of a build-target mismatch. Running the two apps locally as above is the supported path today.
 
 ## Usage
 
@@ -151,7 +167,14 @@ All application routes are prefixed with `/api`. Routes marked **Bearer** requir
 | PATCH | `/api/{user_id}/tasks/{task_id}/complete` | Toggle completion | Bearer |
 | POST | `/api/chat` | AI assistant (LLM + tool calls) | Bearer |
 | GET | `/api/chat/conversations` | List conversations | Bearer |
-| * | `/api/rag/*` | RAG chat with sources, per-user document indexing (Qdrant) | Bearer |
+| POST | `/api/rag/chat` | Grounded RAG answer with sources (task commands share this route) | Bearer |
+| POST | `/api/rag/upload-and-index` | Multipart upload → extract, chunk, embed, index | Bearer |
+| GET | `/api/rag/search?query=` | Similarity search over the caller's corpus only | Bearer |
+| GET | `/api/rag/sessions` | List chat sessions | Bearer |
+| POST | `/api/rag/sessions` | Create a chat session | Bearer |
+| GET | `/api/rag/sessions/{id}/messages` | Messages of one session (owner only) | Bearer |
+| GET | `/api/rag/documents` | List the caller's indexed documents | Bearer |
+| DELETE | `/api/rag/reset-index` | Clear the caller's chunks and document rows | Bearer |
 | GET | `/health` | Health check | Public |
 
 ### Example: create a task
@@ -176,11 +199,41 @@ curl -s -X POST "http://localhost:8000/api/$USER_ID/tasks" \
 
 Chat requests to `POST /api/chat` are executed by `backend/src/agents/todo_agent.py`, which calls the same five tools the MCP server (`backend/src/mcp/todo_mcp_server.py`) exposes over stdio. Set an AI provider (see [Configuration](#configuration)) to enable real responses; without a key the endpoint returns a graceful "not configured" reply.
 
+### RAG document chat
+
+End-to-end example against a running backend (see Quickstart step 6 for setup):
+
+```bash
+# 1. Log in
+TOKEN=$(curl -s -X POST http://localhost:8000/api/token \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret-pass"}' | jq -r .access_token)
+
+# 2. Upload a document → extract, chunk, embed, index
+printf 'project kickoff notes: budget is 42 dollars\n' > /tmp/notes.txt
+curl -F "files=@/tmp/notes.txt" -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/rag/upload-and-index
+#   → {"success":true,"indexed_count":1,...}
+
+# 3. Similarity search (caller's corpus only)
+curl -s "http://localhost:8000/api/rag/search?query=budget" \
+  -H "Authorization: Bearer $TOKEN"
+#   → results[0].metadata.file_name == "notes.txt"
+
+# 4. Grounded chat with sources
+curl -s -X POST http://localhost:8000/api/rag/chat \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"message":"what is in my notes about the budget?"}'
+#   → answer + sources[0].metadata.file_name == "notes.txt"
+```
+
+In the UI: **`/chat`** → drop a file into *Document Upload* → ask a question; the reply carries a `Sources [n]` chip. Each user only ever retrieves their own documents (`metadata.user_id` filter).
+
 ## Configuration
 
 Set these in `.env` (copy `.env.example` to `.env` and fill it in), as shell environment variables, or via docker-compose `environment:` blocks. The backend resolves them with `os.getenv`.
 
-> `docker-compose.yml` also provisions **Qdrant** and **Redis** services. Neither is consumed by application code yet — see [Known Limitations](#known-limitations) — so you can ignore them when running locally.
+> `docker-compose.yml` also provisions **Qdrant** and **Redis** services. Qdrant backs RAG document search; Redis is not consumed by application code yet, so you can ignore it when running locally.
 
 | Variable | Purpose | Example |
 | --- | --- | --- |
@@ -193,9 +246,12 @@ Set these in `.env` (copy `.env.example` to `.env` and fill it in), as shell env
 | `ALLOWED_ORIGINS` | CORS allow-list | `http://localhost:3000` |
 | `RATE_LIMIT_ENABLED` | Toggle rate limiting | `true` |
 | `SECURITY_HEADERS_ENABLED` | Toggle security headers | `true` |
-| `AI_PROVIDER` | `gemini` or `openai` | `gemini` |
-| `GEMINI_API_KEY` / `OPENAI_API_KEY` | Provider credentials | *(optional — chat degrades gracefully without them)* |
-| `GEMINI_MODEL` / `OPENAI_MODEL` | Model selection | `gemini-2.5-flash` |
+| `AI_PROVIDER` | `openai`, `gemini`, or `openrouter` | `openrouter` |
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY` | Provider credentials | *(optional — chat degrades gracefully without them)* |
+| `GEMINI_MODEL` / `OPENAI_MODEL` / `OPENROUTER_MODEL` | Model selection | `nvidia/nemotron-3.5-lightning:free` |
+| `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` (compose backend: `http://qdrant:6333`) |
+| `RAG_COLLECTION` | Qdrant collection name | `todo_documents` |
+| `ALLOWED_DOCUMENT_PATH` | Base dir allowed for `POST /api/rag/index-local-files` | `/app/documents/` |
 | `NEXT_PUBLIC_BACKEND_URL` | Frontend → API base URL | `http://localhost:8000` |
 
 ## Testing & Linting
@@ -204,8 +260,10 @@ Set these in `.env` (copy `.env.example` to `.env` and fill it in), as shell env
 
 ```bash
 cd backend
-pytest tests/ -v --tb=short     # 24 tests: auth, tasks, security, health
+pytest tests/ -v --tb=short     # 69 tests: auth, tasks, security, health, RAG (unit + route)
 ```
+
+> Two embedding tests skip until the model is fetched (`scripts/fetch_embeddings_model.py`) and `onnxruntime`/`tokenizers` are installed.
 
 > Tests boot the FastAPI app, which checks for a reachable PostgreSQL. Start Postgres first (`docker-compose up -d postgres`) or point `DATABASE_URL` at a test database.
 
@@ -232,8 +290,10 @@ Every row below is a known, documented issue — check here before opening one.
 | `docker-compose build backend` fails | Compose targets `development`, but `backend/Dockerfile` only defines `builder` and `production` stages | Run the two apps locally per the [Quickstart](#quickstart) — that is the supported path |
 | `scripts/dev-start.sh` errors mentioning `adminer` | The script references an undefined `adminer` service | Start services individually (e.g. `docker-compose up -d postgres`) instead |
 | `scripts/test.sh` fails on missing directories | It runs `tests/integration/` and `tests/security/`, which do not exist yet | Run `pytest tests/ -v` directly |
-| Chat replies "not configured" | No AI provider credentials set | Set `AI_PROVIDER` plus `GEMINI_API_KEY` or `OPENAI_API_KEY` (see [Configuration](#configuration)) |
-| Frontend password-reset flow errors | The frontend calls `/api/auth/request-password-reset` and `/api/auth/reset-password`, which have no backend routes yet | Avoid the reset flow for now (tracked in [Known Limitations](#known-limitations)) |
+| Chat replies "not configured" | No AI provider credentials set | Set `AI_PROVIDER` plus `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` (see [Configuration](#configuration)) |
+| Embedding tests skip / upload indexing fails with a missing model | ONNX weights not fetched (or `onnxruntime`/`tokenizers` not installed) | `backend/.venv/bin/python scripts/fetch_embeddings_model.py` and `pip install -r backend/requirements.txt` |
+| Upload succeeds but chat answers ignore the file | No AI provider key, so chat returns the "not configured" reply | Set an `AI_PROVIDER` + key (Quickstart step 6) |
+| Frontend password-reset flow errors | The frontend calls `/api/auth/request-password-reset` and `/api/auth/reset-password`, which have no backend routes yet | Avoid the reset flow for now |
 | Frontend cannot reach the API | Wrong base URL | Set `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000` when starting the frontend |
 
 ## Project Structure
@@ -243,55 +303,35 @@ Todo_App/
 ├── backend/                  # FastAPI API
 │   ├── main.py               # App entrypoint: routers, middleware, lifespan
 │   ├── requirements.txt      # Python dependencies
+│   ├── models/               # ONNX embedding model (tokenizer committed, weights gitignored)
+│   ├── ruff.toml             # ruff config (FastAPI Depends exemptions)
 │   ├── src/
-│   │   ├── api/              # tasks, users, chat, and rag routers
+│   │   ├── api/              # tasks, users, chat routers + api/v1/rag.py
 │   │   ├── auth/             # auth router, JWT service, password hashing
 │   │   ├── agents/           # LLM agent + task tool functions
+│   │   ├── llm/              # provider resolver (openai | gemini | openrouter)
 │   │   ├── mcp/              # MCP stdio server (5 todo tools)
 │   │   ├── models/           # SQLModel models (User, Task, RAG)
 │   │   ├── database/         # engine, sessions, table setup
 │   │   ├── security/         # middleware, CORS, validation, config
-│   │   ├── rag/              # RAG chatbot facade, ingestion, embeddings, Qdrant store
+│   │   ├── rag/              # chain, chatbot, ingestion, embeddings, Qdrant store
 │   │   └── schemas/          # Pydantic request/response schemas
-│   └── tests/                # pytest suite (24 tests)
+│   └── tests/                # pytest suite (69 tests, tests/rag/ for the RAG subsystem)
 ├── frontend/                 # Next.js app
 │   └── src/
 │       ├── app/              # routes: auth, dashboard, tasks, stats, chat, settings
-│       ├── components/       # auth, chat, layout, tasks, ui
+│       ├── components/       # auth, chat, layout, tasks, rag, ui
 │       ├── contexts/         # AuthContext, ThemeContext
 │       ├── hooks/            # useAuth, useTasks
 │       └── lib/              # axios client, API helpers
-├── scripts/                  # setup, dev start/stop, test, lint helpers
-├── docker-compose.yml        # dev: postgres, backend, frontend, qdrant, redis
+├── scripts/                  # setup, dev start/stop, test, lint, fetch_embeddings_model helpers
+├── docker-compose.yml        # dev: postgres, backend, frontend, qdrant (v1.19.2), redis
 └── docker-compose.prod.yml   # production build targets
 ```
 
-## Known Limitations
-
-Tracked honestly so reviewers know exactly what is real today:
-
-1. **Docker dev build for the backend fails** — `docker-compose.yml` uses `target: development`, but `backend/Dockerfile` only defines `builder` and `production` stages. Use the local Quickstart until the compose target or Dockerfile is fixed.
-2. **`scripts/dev-start.sh` starts an undefined `adminer` service**, and **`scripts/test.sh` runs `tests/integration/` and `tests/security/`** directories that do not exist yet (use `pytest tests/` directly).
-3. **RAG needs one-time setup** — run `backend/.venv/bin/python scripts/fetch_embeddings_model.py` to download the ONNX embedding model (~90 MB), and configure an AI provider key (`GEMINI_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`) for answers. Uploaded docs are isolated per user via a `user_id` filter.
-4. **Redis is provisioned but unused** — no backend code imports it yet.
-5. **Password-reset calls in the frontend** (`/api/auth/request-password-reset`, `/api/auth/reset-password`) have no matching backend routes.
-6. **No CI workflows and no screenshots** yet; Python dependencies are lower-bounded (`>=`) rather than pinned.
-7. **No migration tooling in-repo** — tables are created via `create_all` at startup; Alembic is a dependency but no migration directory is committed.
-
-## Roadmap
-
-Natural next steps, each derived directly from the limitations above — self-contained contribution targets, with no dates promised:
-
-- **Fix the Docker dev stack** — align the compose `target` with the Dockerfile stages, then document a one-command start.
-- **Add real migrations** — commit an Alembic migration directory and move off startup `create_all`.
-- **Use Redis (or drop it)** — consume it for rate limiting / caching, or remove it from compose.
-- **Implement password reset** — add the two backend routes the frontend already calls.
-- **Add CI and screenshots** — lint + pytest workflows, a screenshot gallery, and pinned (`==`) Python dependencies.
-- **Reconcile `scripts/test.sh`** — create the missing test directories it expects, or point it at `tests/`.
-
 ## Contributing
 
-Contributions are welcome — not sure where to start? The [Roadmap](#roadmap) lists focused, self-contained targets.
+Contributions are welcome — not sure where to start? Open an issue.
 
 1. Fork the repository and create a feature branch: `git checkout -b feature/my-change`
 2. Set up the project following the [Quickstart](#quickstart)
