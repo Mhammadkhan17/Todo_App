@@ -49,7 +49,7 @@ def main() -> int:
     ok = all(
         download(
             name,
-            MODEL_DIR / ("onnx" if name.startswith("model.") else name),
+            MODEL_DIR / "onnx" / name if name.startswith("model.") else MODEL_DIR / name,
             force=args.force,
         )
         for name in REQUIRED
