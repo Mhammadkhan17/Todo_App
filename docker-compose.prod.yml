@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: todo_app_postgres_prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: todo_app
+      POSTGRES_USER: todo_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-todo_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - todo_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo_user -d todo_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: todo_app_backend_prod
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - USE_HTTPS=false
+      - DATABASE_URL=postgresql://todo_user:${POSTGRES_PASSWORD:-todo_password}@postgres:5432/todo_app
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-prod-secret-key-change-in-production}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+      - PASSWORD_MIN_LENGTH=8
+      - BCRYPT_ROUNDS=12
+      - RATE_LIMIT_ENABLED=true
+      - CORS_ENABLED=true
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000}
+      - DATABASE_SSL_MODE=require
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend/logs:/app/logs
+    ports:
+      - "8000:8000"
+    networks:
+      - todo_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: todo_app_frontend_prod
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BASE_URL=${FRONTEND_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_API_BASE_URL=${BACKEND_URL:-http://backend:8000}/api
+      - NEXT_PUBLIC_BACKEND_URL=${BACKEND_URL:-http://backend:8000}
+    ports:
+      - "3000:3000"
+    networks:
+      - todo_network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: todo_app_redis_prod
+    restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - redis_conf:/etc/redis/
+    networks:
+      - todo_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  redis_conf:
+    driver: local
+
+networks:
+  todo_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

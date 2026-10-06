@@ -1,0 +1,149 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+
+# Build outputs
+dist/
+build/
+target/
+.next/
+.nuxt/
+out/
+.output/
+.svelte-kit/
+.craftos/
+
+# Python
+*.so
+.Python
+*.egg-info/
+.eggs/
+.eggs.*/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Changelog (kept local, not committed)
+CHANGELOG.md
+
+# Agents
+.agents/
+opencode.jsonc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Testing
+coverage/
+.coverage
+.eslintcache
+.turbo/
+storybook-static/
+*.gcda
+*.gcno
+.pytest_cache/
+.covers/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+iTunes Music Library.xml
+Thumbs.db
+
+# Local development
+.dockerenv
+!docker-compose.yml
+!docker-compose.dev.yml
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Secrets and sensitive data
+secrets/
+credentials.json
+*.key
+*.pem
+private.key
+private.pem
+secret.*
+
+# Frontend specific
+public/build/
+.next/cache/
+*.tsbuildinfo
+next-env.d.ts
+
+# Backend specific
+alembic_version
+alembic/
+migrations/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# CI/CD
+# .github/ workflows are tracked
+!.github/workflows/
+!.github/CODEOWNERS
+# Neon (local MCP state + config)
+.neon
+neon.ts

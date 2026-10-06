@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.coverage
+.cache
+.pytest_cache
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Tests
+tests/
+test_*
+*_test.py
+
+# Development files
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+
+# Node.js (if any frontend assets)
+node_modules/
+package.json
+package-lock.json
+
+# Docker
+Dockerfile*
+.dockerignore
+.docker/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.gitignore
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# OS generated files
+.directory
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Python bytecode
+*.pyc
+*.pyo
+*.pyd
