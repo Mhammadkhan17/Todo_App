@@ -3,8 +3,9 @@ RAG Chatbot API endpoints
 """
 import os
 import uuid
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -51,6 +52,12 @@ def get_chatbot() -> RAGChatbot:
 
 def get_ingestor() -> DocumentIngestor:
     return DocumentIngestor()
+
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
+SessionDep = Annotated[Session, Depends(get_session)]
+ChatbotDep = Annotated[RAGChatbot, Depends(get_chatbot)]
+IngestorDep = Annotated[DocumentIngestor, Depends(get_ingestor)]
 
 
 def detect_intent(message: str) -> str:
@@ -110,12 +117,12 @@ def detect_intent(message: str) -> str:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_rag(
+def chat_with_rag(
     request: ChatRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-    bot: RAGChatbot = Depends(get_chatbot),
-):
+    current_user: CurrentUserDep,
+    db: SessionDep,
+    bot: ChatbotDep,
+) -> ChatResponse:
     """
     Chat with the RAG-enabled bot that can handle both document queries and task management
     """
@@ -206,11 +213,11 @@ async def chat_with_rag(
 
 
 @router.post("/sessions", response_model=CreateSessionResponse)
-async def create_chat_session(
+def create_chat_session(
     request: CreateSessionRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-):
+    current_user: CurrentUserDep,
+    db: SessionDep,
+) -> CreateSessionResponse:
     """
     Create a new chat session
     """
@@ -231,10 +238,10 @@ async def create_chat_session(
 
 
 @router.get("/sessions")
-async def list_chat_sessions(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-):
+def list_chat_sessions(
+    current_user: CurrentUserDep,
+    db: SessionDep,
+) -> dict[str, Any]:
     """
     List all chat sessions for the user
     """
@@ -251,11 +258,11 @@ async def list_chat_sessions(
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(
-    session_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-):
+def get_session_messages(
+    session_id: Annotated[str, Path()],
+    current_user: CurrentUserDep,
+    db: SessionDep,
+) -> dict[str, Any]:
     """
     Get all messages for a specific session
     """
@@ -282,12 +289,12 @@ async def get_session_messages(
 
 
 @router.post("/upload-and-index")
-async def upload_and_index_documents(
-    files: list[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-    ingestor: DocumentIngestor = Depends(get_ingestor),
-):
+def upload_and_index_documents(
+    files: Annotated[list[UploadFile], File()],
+    current_user: CurrentUserDep,
+    db: SessionDep,
+    ingestor: IngestorDep,
+) -> DocumentIndexResponse:
     """
     Upload documents and index them into the user's Qdrant collection.
     """
@@ -299,7 +306,7 @@ async def upload_and_index_documents(
             if ext not in ALLOWED_UPLOAD_EXTENSIONS:
                 rejected += 1
                 continue
-            content = await upload.read()
+            content = upload.file.read()
             if len(content) > MAX_FILE_SIZE:
                 rejected += 1
                 continue
@@ -328,12 +335,12 @@ async def upload_and_index_documents(
 
 
 @router.post("/index-local-files")
-async def index_local_files(
+def index_local_files(
     file_paths: list[str],
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-    ingestor: DocumentIngestor = Depends(get_ingestor),
-):
+    current_user: CurrentUserDep,
+    db: SessionDep,
+    ingestor: IngestorDep,
+) -> DocumentIndexResponse:
     """
     Index locally accessible files
     """
@@ -363,12 +370,12 @@ async def index_local_files(
 
 
 @router.get("/search")
-async def search_documents(
-    query: str,
-    k: int = 5,
-    current_user: User = Depends(get_current_user),
-    bot: RAGChatbot = Depends(get_chatbot),
-):
+def search_documents(
+    current_user: CurrentUserDep,
+    bot: ChatbotDep,
+    query: Annotated[str, Query()],
+    k: Annotated[int, Query()] = 5,
+) -> dict[str, Any]:
     """
     Search for documents similar to the query (current user's corpus only).
     """
@@ -380,10 +387,10 @@ async def search_documents(
 
 
 @router.get("/documents")
-async def list_user_documents(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-):
+def list_user_documents(
+    current_user: CurrentUserDep,
+    db: SessionDep,
+) -> dict[str, Any]:
     """
     List all documents uploaded by the user
     """
@@ -400,11 +407,11 @@ async def list_user_documents(
 
 
 @router.delete("/reset-index")
-async def reset_rag_index(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_session),
-    ingestor: DocumentIngestor = Depends(get_ingestor),
-):
+def reset_rag_index(
+    current_user: CurrentUserDep,
+    db: SessionDep,
+    ingestor: IngestorDep,
+) -> dict[str, Any]:
     """
     Reset the current user's RAG index and document rows.
     """
