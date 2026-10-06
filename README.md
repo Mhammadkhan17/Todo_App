@@ -2,7 +2,7 @@
 
 **TodoFlow** — a full-stack task-management application with JWT authentication, statistics dashboards, and an AI chat assistant, built with FastAPI and Next.js for developers who want a production-shaped reference project to review, run, and contribute to.
 
-> **Status:** production-shaped MVP — auth, tasks, statistics, dashboard, and AI chat are real and runnable today; RAG, Redis, the Docker dev stack, and migration tooling are not finished. See [Known Limitations](#known-limitations).
+> **Status:** production-shaped MVP — auth, tasks, statistics, dashboard, and AI chat are real and runnable today; Redis and migration tooling are not finished. See [Known Limitations](#known-limitations).
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@
 | ORM | SQLModel ≥ 0.0.18 + SQLAlchemy ≥ 2.0.35 |
 | Database | PostgreSQL 16 (required — SQLite is explicitly rejected) |
 | Auth | `python-jose` (JWT HS256), `argon2-cffi` (Argon2id) |
-| AI / RAG | LangChain, `langchain-openai`, `langchain-google-genai`, `qdrant-client`, `pypdf`, `unstructured` *(RAG is scaffolded — see [Known Limitations](#known-limitations))* |
+| AI / RAG | LangChain, `langchain-openai`, `langchain-google-genai`, `langchain-qdrant`, `qdrant-client`, `pypdf`, `unstructured`, `onnxruntime`, `tokenizers` |
 | Agents / Tools | `mcp` (Model Context Protocol) |
 | Tooling | pytest, black, ruff, mypy |
 
@@ -151,7 +151,7 @@ All application routes are prefixed with `/api`. Routes marked **Bearer** requir
 | PATCH | `/api/{user_id}/tasks/{task_id}/complete` | Toggle completion | Bearer |
 | POST | `/api/chat` | AI assistant (LLM + tool calls) | Bearer |
 | GET | `/api/chat/conversations` | List conversations | Bearer |
-| * | `/api/rag/*` | RAG chat, sessions, document indexing *(scaffold — indexing is simulated today)* | Bearer |
+| * | `/api/rag/*` | RAG chat with sources, per-user document indexing (Qdrant) | Bearer |
 | GET | `/health` | Health check | Public |
 
 ### Example: create a task
@@ -251,7 +251,7 @@ Todo_App/
 │   │   ├── models/           # SQLModel models (User, Task, RAG)
 │   │   ├── database/         # engine, sessions, table setup
 │   │   ├── security/         # middleware, CORS, validation, config
-│   │   ├── rag/              # RAG chatbot/ingest (in progress)
+│   │   ├── rag/              # RAG chatbot facade, ingestion, embeddings, Qdrant store
 │   │   └── schemas/          # Pydantic request/response schemas
 │   └── tests/                # pytest suite (24 tests)
 ├── frontend/                 # Next.js app
@@ -272,7 +272,7 @@ Tracked honestly so reviewers know exactly what is real today:
 
 1. **Docker dev build for the backend fails** — `docker-compose.yml` uses `target: development`, but `backend/Dockerfile` only defines `builder` and `production` stages. Use the local Quickstart until the compose target or Dockerfile is fixed.
 2. **`scripts/dev-start.sh` starts an undefined `adminer` service**, and **`scripts/test.sh` runs `tests/integration/` and `tests/security/`** directories that do not exist yet (use `pytest tests/` directly).
-3. **RAG is a scaffold** — `backend/src/rag/` contains placeholders, and `POST /api/rag/upload-and-index` simulates indexing. Qdrant is provisioned in compose but not yet called by application code.
+3. **RAG needs one-time setup** — run `backend/.venv/bin/python scripts/fetch_embeddings_model.py` to download the ONNX embedding model (~90 MB), and configure an AI provider key (`GEMINI_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`) for answers. Uploaded docs are isolated per user via a `user_id` filter.
 4. **Redis is provisioned but unused** — no backend code imports it yet.
 5. **Password-reset calls in the frontend** (`/api/auth/request-password-reset`, `/api/auth/reset-password`) have no matching backend routes.
 6. **No CI workflows and no screenshots** yet; Python dependencies are lower-bounded (`>=`) rather than pinned.
@@ -284,7 +284,6 @@ Natural next steps, each derived directly from the limitations above — self-co
 
 - **Fix the Docker dev stack** — align the compose `target` with the Dockerfile stages, then document a one-command start.
 - **Add real migrations** — commit an Alembic migration directory and move off startup `create_all`.
-- **Finish RAG** — replace the simulated `/api/rag/upload-and-index` with real Qdrant ingestion and wire the existing dependencies.
 - **Use Redis (or drop it)** — consume it for rate limiting / caching, or remove it from compose.
 - **Implement password reset** — add the two backend routes the frontend already calls.
 - **Add CI and screenshots** — lint + pytest workflows, a screenshot gallery, and pinned (`==`) Python dependencies.
