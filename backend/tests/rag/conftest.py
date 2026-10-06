@@ -7,11 +7,19 @@ from sqlmodel import SQLModel
 
 import src.models.rag  # noqa: F401  register Document/ChatSession/ChatMessage on SQLModel.metadata
 from src.auth.jwt_service import JWTService
+from src.rag.store import reset_singletons
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _rag_tables(test_db):
     SQLModel.metadata.create_all(bind=test_db)
+
+
+@pytest.fixture(autouse=True)
+def _reset_store_singletons():
+    reset_singletons()
+    yield
+    reset_singletons()
 
 
 @pytest.fixture
