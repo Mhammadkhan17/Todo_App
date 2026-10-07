@@ -66,7 +66,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # 4. Add security headers
         if self.security_headers_enabled:
-            self._add_security_headers(response)
+            self._add_security_headers(response, request.url.path)
 
         return response
 
@@ -117,7 +117,25 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Fall back to direct connection
         return request.client.host if request.client else "unknown"
 
-    def _add_security_headers(self, response: Response) -> None:
+    # Swagger UI / ReDoc pull their bundles from CDNs and FastAPI renders the
+    # Swagger bootstrap as an inline <script>, so the default `default-src 'self'`
+    # policy renders /api/docs blank. Relax the policy only for the docs paths.
+    _DOCS_CSP = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.redoc.ly; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "font-src 'self' data: https://cdn.jsdelivr.net; "
+        "frame-ancestors 'self' https://*.hf.space https://huggingface.co;"
+    )
+    _DOCS_PATH_PREFIXES = (
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi",
+        "/api/oauth2-redirect",
+    )
+
+    def _add_security_headers(self, response: Response, path: str = "") -> None:
         """Add security headers to response."""
 
         # Basic security headers
@@ -141,7 +159,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Content Security Policy
         # Allow Hugging Face domains to frame the application
         default_csp = "default-src 'self'; frame-ancestors 'self' https://*.hf.space https://huggingface.co;"
-        csp = os.getenv("CSP_POLICY", default_csp)
+        if os.getenv("CSP_POLICY"):
+            csp = os.getenv("CSP_POLICY")
+        elif path.startswith(self._DOCS_PATH_PREFIXES):
+            csp = self._DOCS_CSP
+        else:
+            csp = default_csp
         security_headers["Content-Security-Policy"] = csp
 
         # Add headers to response
