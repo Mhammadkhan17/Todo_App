@@ -26,12 +26,23 @@ interface LuxuryDashboardLayoutProps {
   user: User | null;
   children: React.ReactNode;
   onLogout: () => void;
+  // Immersive = no top navbar, no footer, no main padding/max-width — the page
+  // owns the entire right column (used by /chat for an edge-to-edge chat).
+  immersive?: boolean;
 }
 
-export default function LuxuryDashboardLayout({ user, children, onLogout }: LuxuryDashboardLayoutProps) {
+export default function LuxuryDashboardLayout({ user, children, onLogout, immersive = false }: LuxuryDashboardLayoutProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+
+  // Pages without the top navbar (which hosts the hamburger) can open the
+  // sidebar by dispatching this event from their own header.
+  useEffect(() => {
+    const openNav = () => setSidebarOpen(true);
+    window.addEventListener('app:open-nav', openNav);
+    return () => window.removeEventListener('app:open-nav', openNav);
+  }, []);
 
   // Resolve the effective theme after mount to avoid a hydration mismatch
   const [resolvedDark, setResolvedDark] = useState(false);
@@ -145,36 +156,44 @@ export default function LuxuryDashboardLayout({ user, children, onLogout }: Luxu
       {/* Main Content Area */}
       <div className="lg:pl-64 flex flex-col min-h-screen relative z-10">
         {/* Top Header */}
-        <header className="h-16 flex items-center justify-between px-6 border-b border-stone-200 dark:border-stone-800 bg-stone-50/80 dark:bg-[#0a0a0a]/80 backdrop-blur-md sticky top-0 z-30">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open navigation"
-              className="lg:hidden p-2 -m-1 text-stone-500 hover:text-stone-900 dark:hover:text-white"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
-              <h1 className="text-[11px] font-mono font-bold uppercase tracking-widest text-stone-500 dark:text-stone-400">
-                {pathname.split('/').pop() || 'Core'} {'//'} Execution Mode
-              </h1>
+        {!immersive && (
+          <header className="h-16 flex items-center justify-between px-6 border-b border-stone-200 dark:border-stone-800 bg-stone-50/80 dark:bg-[#0a0a0a]/80 backdrop-blur-md sticky top-0 z-30">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open navigation"
+                className="lg:hidden p-2 -m-1 text-stone-500 hover:text-stone-900 dark:hover:text-white"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
+                <h1 className="text-[11px] font-mono font-bold uppercase tracking-widest text-stone-500 dark:text-stone-400">
+                  {pathname.split('/').pop() || 'Core'} {'//'} Execution Mode
+                </h1>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={toggleTheme}
-              aria-label={resolvedDark ? 'Switch to light theme' : 'Switch to dark theme'}
-              className="min-h-11 min-w-11 flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-white transition-colors"
-            >
-              {resolvedDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-          </div>
-        </header>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleTheme}
+                aria-label={resolvedDark ? 'Switch to light theme' : 'Switch to dark theme'}
+                className="min-h-11 min-w-11 flex items-center justify-center text-stone-500 hover:text-stone-900 dark:hover:text-white transition-colors"
+              >
+                {resolvedDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+            </div>
+          </header>
+        )}
 
         {/* Content Section */}
-        <main className="flex-1 p-6 lg:p-10 max-w-screen-2xl mx-auto w-full">
+        <main
+          className={
+            immersive
+              ? 'flex-1 w-full'
+              : 'flex-1 p-6 lg:p-10 max-w-screen-2xl mx-auto w-full'
+          }
+        >
           <motion.div
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -185,13 +204,15 @@ export default function LuxuryDashboardLayout({ user, children, onLogout }: Luxu
         </main>
 
         {/* Technical Footer */}
-        <footer className="py-6 px-6 lg:px-10 border-t border-stone-200 dark:border-stone-900 bg-stone-50 dark:bg-[#0a0a0a] flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-[11px] font-mono font-medium text-stone-500 dark:text-stone-500 uppercase tracking-widest">&copy; 2026 TodoFlow</p>
-          <div className="flex items-center gap-1.5 text-[11px] font-mono font-medium text-stone-500 dark:text-stone-500">
-            <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>
-            Systems Locked
-          </div>
-        </footer>
+        {!immersive && (
+          <footer className="py-6 px-6 lg:px-10 border-t border-stone-200 dark:border-stone-900 bg-stone-50 dark:bg-[#0a0a0a] flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-[11px] font-mono font-medium text-stone-500 dark:text-stone-500 uppercase tracking-widest">&copy; 2026 TodoFlow</p>
+            <div className="flex items-center gap-1.5 text-[11px] font-mono font-medium text-stone-500 dark:text-stone-500">
+              <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>
+              Systems Locked
+            </div>
+          </footer>
+        )}
       </div>
     </div>
   );
