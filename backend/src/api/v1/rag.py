@@ -5,7 +5,16 @@ import os
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+)
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -17,12 +26,14 @@ from ...models.user import User
 from ...rag.chatbot import RAGChatbot
 from ...rag.ingest import DocumentIngestor
 
-router = APIRouter(prefix="/rag", tags=["rag"])
+router = APIRouter(prefix="/rag")
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None  # If provided, continue existing session
     user_id: str | None = None
+    # Chat-scoped docs uploaded before this session existed: bind them now
+    document_ids: list[str] | None = None
 
 class ChatResponse(BaseModel):
     response: str
@@ -34,6 +45,9 @@ class DocumentIndexResponse(BaseModel):
     success: bool
     message: str
     indexed_count: int | None = None
+
+class DocumentActiveRequest(BaseModel):
+    is_active: bool
 
 class CreateSessionRequest(BaseModel):
     title: str
@@ -58,6 +72,48 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 SessionDep = Annotated[Session, Depends(get_session)]
 ChatbotDep = Annotated[RAGChatbot, Depends(get_chatbot)]
 IngestorDep = Annotated[DocumentIngestor, Depends(get_ingestor)]
+
+
+def _bind_pending_documents(
+    db: Session, user_id: str, session_id: str, document_ids: list[str]
+) -> None:
+    """Attach chat-scoped docs uploaded before this session existed."""
+    rows = db.exec(
+        select(Document)
+        .where(Document.user_id == user_id)
+        .where(Document.id.in_(document_ids))
+    ).all()
+    changed = False
+    for row in rows:
+        if row.scope == "chat" and row.session_id is None:
+            row.session_id = session_id
+            db.add(row)
+            changed = True
+    if changed:
+        db.commit()
+
+
+def _allowed_document_ids(db: Session, user_id: str, session_id: str) -> list[str]:
+    """Docs retrievable in this chat: active AND (universal OR bound here)."""
+    rows = db.exec(
+        select(Document.id)
+        .where(Document.user_id == user_id)
+        .where(Document.is_active.is_(True))
+        .where(
+            (Document.scope == "universal") | (Document.session_id == session_id)
+        )
+    ).all()
+    return [str(row_id) for row_id in rows]
+
+
+def _active_document_ids(db: Session, user_id: str) -> list[str]:
+    """All of the user's kept documents (search ignores chat scoping)."""
+    rows = db.exec(
+        select(Document.id)
+        .where(Document.user_id == user_id)
+        .where(Document.is_active.is_(True))
+    ).all()
+    return [str(row_id) for row_id in rows]
 
 
 def detect_intent(message: str) -> str:
@@ -130,6 +186,16 @@ def chat_with_rag(
         # Create or retrieve chat session
         session_id = request.session_id or str(uuid.uuid4())
 
+        # Resume only into a session the caller owns (matches upload/GET guards)
+        if request.session_id:
+            owner = db.exec(
+                select(ChatSession)
+                .where(ChatSession.id == request.session_id)
+                .where(ChatSession.user_id == str(current_user.id))
+            ).first()
+            if owner is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+
         # Detect intent to determine how to process the request
         intent = detect_intent(request.message)
 
@@ -164,7 +230,18 @@ def chat_with_rag(
             }
         else:
             # Process as document query using RAG
-            response = bot.generate_response(request.message, str(current_user.id))
+            if request.document_ids:
+                _bind_pending_documents(
+                    db, str(current_user.id), session_id, request.document_ids
+                )
+            allowed_ids = _allowed_document_ids(
+                db, str(current_user.id), session_id
+            )
+            response = bot.generate_response(
+                request.message,
+                str(current_user.id),
+                document_ids=allowed_ids,
+            )
 
         # Store the conversation in the database
         # Create chat message entry
@@ -208,6 +285,8 @@ def chat_with_rag(
             query=request.message,
             session_id=session_id
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -294,11 +373,29 @@ def upload_and_index_documents(
     current_user: CurrentUserDep,
     db: SessionDep,
     ingestor: IngestorDep,
+    scope: Annotated[str, Form()] = "universal",
+    session_id: Annotated[str | None, Form()] = None,
 ) -> DocumentIndexResponse:
     """
     Upload documents and index them into the user's Qdrant collection.
+
+    `scope` is "universal" (retrieved in every chat) or "chat" (only the chat
+    identified by `session_id`; omit `session_id` to bind on first message).
     """
     try:
+        if scope not in {"universal", "chat"}:
+            raise HTTPException(status_code=400, detail="scope must be universal or chat")
+        if scope == "universal":
+            session_id = None
+        elif session_id:
+            owner = db.exec(
+                select(ChatSession)
+                .where(ChatSession.id == session_id)
+                .where(ChatSession.user_id == str(current_user.id))
+            ).first()
+            if owner is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+
         payloads: list[tuple[str, bytes]] = []
         rejected = 0
         for upload in files:
@@ -318,7 +415,9 @@ def upload_and_index_documents(
                 detail="No valid files. Supported: PDF, TXT, MD, DOCX (max 10MB each).",
             )
 
-        result = ingestor.ingest_upload(db, str(current_user.id), payloads)
+        result = ingestor.ingest_upload(
+            db, str(current_user.id), payloads, scope=scope, session_id=session_id
+        )
         return DocumentIndexResponse(
             success=result.failed == 0,
             message=(
@@ -372,15 +471,19 @@ def index_local_files(
 @router.get("/search")
 def search_documents(
     current_user: CurrentUserDep,
+    db: SessionDep,
     bot: ChatbotDep,
     query: Annotated[str, Query()],
     k: Annotated[int, Query()] = 5,
 ) -> dict[str, Any]:
     """
-    Search for documents similar to the query (current user's corpus only).
+    Search for documents similar to the query (current user's kept docs only).
     """
     try:
-        results = bot.search_similar(query, str(current_user.id), k=k)
+        allowed_ids = _active_document_ids(db, str(current_user.id))
+        results = bot.search_similar(
+            query, str(current_user.id), k=k, document_ids=allowed_ids
+        )
         return {"results": results, "query": query}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -403,6 +506,59 @@ def list_user_documents(
 
         return {"documents": documents}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/documents/{document_id}")
+def delete_user_document(
+    document_id: Annotated[str, Path()],
+    current_user: CurrentUserDep,
+    db: SessionDep,
+    ingestor: IngestorDep,
+) -> dict[str, Any]:
+    """
+    Delete one of the caller's indexed documents (chunks, stored file, DB row).
+    """
+    try:
+        removed = ingestor.delete_document(db, str(current_user.id), document_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {"success": True, "removed_chunks": removed}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 - match sibling routes
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/documents/{document_id}")
+def set_document_active(
+    document_id: Annotated[str, Path()],
+    request: DocumentActiveRequest,
+    current_user: CurrentUserDep,
+    db: SessionDep,
+) -> dict[str, Any]:
+    """
+    Keep-toggle: set is_active (false = kept in library, excluded from retrieval).
+    """
+    try:
+        row = db.exec(
+            select(Document)
+            .where(Document.id == document_id)
+            .where(Document.user_id == str(current_user.id))
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        row.is_active = request.is_active
+        db.add(row)
+        db.commit()
+        return {
+            "success": True,
+            "document_id": document_id,
+            "is_active": row.is_active,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 - match sibling routes
         raise HTTPException(status_code=500, detail=str(e))
 
 

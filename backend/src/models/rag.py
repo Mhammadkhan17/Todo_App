@@ -21,6 +21,10 @@ class Document(SQLModel, table=True):
     mime_type: str = Field(max_length=100, nullable=False)
     hash: str = Field(max_length=64, nullable=False)  # SHA256 hash
     status: str = Field(default="uploaded", max_length=20)  # uploaded, processing, indexed, failed
+    # universal = retrieved in every chat; chat = only chats via session_id
+    scope: str = Field(default="universal", max_length=20)
+    session_id: str | None = Field(default=None, max_length=64, nullable=True)
+    is_active: bool = Field(default=True)  # keep-toggle: off = kept but not retrieved
     document_metadata: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)))
     updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)))

@@ -88,6 +88,34 @@ class DatabaseEngine:
             logger.error(f"Failed to create database tables: {e}")
             raise
 
+    def ensure_rag_document_columns(self) -> None:
+        """Add document columns create_all cannot (it never alters existing tables).
+
+        Idempotent: `ADD COLUMN IF NOT EXISTS` no-ops when the column exists;
+        existing rows inherit universal/active defaults.
+        """
+        from sqlalchemy import text
+
+        statements = [
+            (
+                "ALTER TABLE document "
+                "ADD COLUMN IF NOT EXISTS scope VARCHAR(20) NOT NULL DEFAULT 'universal'"
+            ),
+            "ALTER TABLE document ADD COLUMN IF NOT EXISTS session_id VARCHAR(64)",
+            (
+                "ALTER TABLE document "
+                "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"
+            ),
+        ]
+        try:
+            with self.engine.begin() as conn:
+                for stmt in statements:
+                    conn.execute(text(stmt))
+            logger.info("document table columns verified/added")
+        except Exception as e:
+            logger.error(f"Failed to ensure document columns: {e}")
+            raise
+
     def drop_all_tables(self) -> None:
         """Drop all database tables (for testing only)."""
         try:

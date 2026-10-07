@@ -94,7 +94,13 @@ class DocumentIngestor:
 
     # -- public API ----------------------------------------------------
     def ingest_upload(
-        self, db: Session, user_id: str, files: Sequence[tuple[str, bytes]]
+        self,
+        db: Session,
+        user_id: str,
+        files: Sequence[tuple[str, bytes]],
+        *,
+        scope: str = "universal",
+        session_id: str | None = None,
     ) -> IngestResult:
         user_id = str(user_id)
         result = IngestResult()
@@ -122,6 +128,8 @@ class DocumentIngestor:
                     file_path=file_path,
                     content=content,
                     result=result,
+                    scope=scope,
+                    session_id=session_id,
                 )
             except (
                 Exception
@@ -213,6 +221,68 @@ class DocumentIngestor:
         db.commit()
         return deleted
 
+    def delete_document(
+        self, db: Session, user_id: str, document_id: str
+    ) -> int | None:
+        """Delete one document owned by user_id: Qdrant chunks, stored file, row.
+
+        Returns the number of removed chunks, or None when the document does
+        not exist (or belongs to another user).
+        """
+        from qdrant_client import models
+
+        user_id = str(user_id)
+        row = db.exec(
+            select(Document)
+            .where(Document.id == document_id)
+            .where(Document.user_id == user_id)
+        ).first()
+        if row is None:
+            return None
+
+        removed = 0
+        client = self._qdrant()
+        name = collection_name()
+        doc_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="metadata.document_id",
+                    match=models.MatchValue(value=document_id),
+                ),
+                models.FieldCondition(
+                    key="metadata.user_id",
+                    match=models.MatchValue(value=user_id),
+                ),
+            ]
+        )
+        if client.collection_exists(name):
+            points, _ = client.scroll(
+                collection_name=name,
+                scroll_filter=doc_filter,
+                limit=10000,
+                with_payload=False,
+                with_vectors=False,
+            )
+            if points:
+                client.delete(
+                    collection_name=name,
+                    points_selector=models.FilterSelector(filter=doc_filter),
+                )
+                removed = len(points)
+
+        if row.file_path:
+            path = Path(row.file_path).resolve()
+            try:
+                path.relative_to(self._uploads_dir.resolve())
+            except ValueError:
+                pass  # stored path outside the uploads dir — never unlink it
+            else:
+                path.unlink(missing_ok=True)
+
+        db.delete(row)
+        db.commit()
+        return removed
+
     # -- internals -----------------------------------------------------
     def _index_one(
         self,
@@ -225,6 +295,8 @@ class DocumentIngestor:
         file_path,
         content,
         result,
+        scope="universal",
+        session_id=None,
     ) -> None:
         new_hash = hashlib.sha256(content).hexdigest()
         existing = db.exec(
@@ -235,6 +307,13 @@ class DocumentIngestor:
         if existing is not None:
             # Compare against the STORED hash before mutating the row
             if existing.status == "indexed" and existing.hash == new_hash:
+                # Identical file: still apply the newly requested scope/binding
+                want_session = session_id if scope == "chat" else None
+                if existing.scope != scope or existing.session_id != want_session:
+                    existing.scope = scope
+                    existing.session_id = want_session
+                    db.add(existing)
+                    db.commit()
                 result.skipped += 1
                 return
             row = existing
@@ -252,6 +331,8 @@ class DocumentIngestor:
         )
         row.hash = new_hash
         row.status = "processing"
+        row.scope = scope
+        row.session_id = session_id if scope == "chat" else None
         db.add(row)
         db.commit()
 

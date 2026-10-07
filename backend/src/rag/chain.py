@@ -20,20 +20,25 @@ Context:
 Question: {question}"""
 
 
-def _search_kwargs(user_id: str, k: int = DEFAULT_K) -> dict:
+def _search_kwargs(
+    user_id: str, k: int = DEFAULT_K, document_ids: list[str] | None = None
+) -> dict:
     from qdrant_client import models
 
-    return {
-        "k": k,
-        "filter": models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="metadata.user_id",
-                    match=models.MatchValue(value=str(user_id)),
-                )
-            ]
-        ),
-    }
+    must: list = [
+        models.FieldCondition(
+            key="metadata.user_id",
+            match=models.MatchValue(value=str(user_id)),
+        )
+    ]
+    if document_ids is not None:
+        must.append(
+            models.FieldCondition(
+                key="metadata.document_id",
+                match=models.MatchAny(any=[str(i) for i in document_ids]),
+            )
+        )
+    return {"k": k, "filter": models.Filter(must=must)}
 
 
 def _source_metadata(doc, score: float) -> dict:
@@ -49,8 +54,12 @@ def hits_to_sources(hits) -> list[dict]:
     ]
 
 
-def create_rag_chain(user_id: str, *, store=None, llm=None) -> Callable[[str], dict]:
-    """Build `question -> {"response", "sources"}` for one user.
+def create_rag_chain(user_id: str, *, store=None, llm=None) -> Callable[..., dict]:
+    """Build `(question, document_ids=None) -> {"response", "sources"}` for one user.
+
+    `document_ids` is the SQL-computed allow-list (None = no allow-list, legacy);
+    it is passed per call so toggles/session scoping take effect immediately even
+    though the chain is cached per user.
 
     Fails fast on a missing LLM key BEFORE touching the vector store.
     """
@@ -58,10 +67,13 @@ def create_rag_chain(user_id: str, *, store=None, llm=None) -> Callable[[str], d
         llm = make_llm()
     store = store or get_vectorstore()
 
-    kwargs = _search_kwargs(str(user_id))
-
-    def _run(question: str) -> dict:
-        hits = store.similarity_search_with_score(question, **kwargs)
+    def _run(question: str, document_ids: list[str] | None = None) -> dict:
+        if document_ids is not None and not document_ids:
+            hits = []  # every document disabled or none allowed for this chat
+        else:
+            hits = store.similarity_search_with_score(
+                question, **_search_kwargs(str(user_id), document_ids=document_ids)
+            )
         context = (
             "\n\n".join(doc.page_content for doc, _ in hits) or "(no documents found)"
         )

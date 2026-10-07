@@ -2,7 +2,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from sqlmodel import select
 
+from src.models.rag import Document
 from src.rag.ingest import ALLOWED_EXTENSIONS, DocumentIngestor, extract_text
 from tests.rag.in_memory import FakeEmbedder
 
@@ -159,3 +161,30 @@ def test_reset_user_only_clears_own_data(ingestor, qdrant_client, db_session):
 def test_allowed_extensions_contract():
     assert ALLOWED_EXTENSIONS == {".pdf", ".txt", ".md", ".markdown", ".docx"}
     assert extract_text("a.txt", "héllo".encode(), Path("a.txt")) == "héllo"
+
+
+def test_ingest_upload_records_scope_and_binding(ingestor, db_session):
+    result = ingestor.ingest_upload(
+        db_session,
+        "1",
+        [("scoped.txt", b"chat specific knowledge")],
+        scope="chat",
+        session_id="sess-1",
+    )
+    assert result.indexed == 1
+    row = db_session.exec(select(Document)).one()
+    assert row.scope == "chat"
+    assert row.session_id == "sess-1"
+
+
+def test_reupload_applies_new_scope_even_when_skipped(ingestor, db_session):
+    ingestor.ingest_upload(
+        db_session, "1", [("flip.txt", b"same bytes forever")], scope="chat",
+        session_id="sess-a",
+    )
+    # identical content again, but now requested as universal -> scope flips
+    result = ingestor.ingest_upload(db_session, "1", [("flip.txt", b"same bytes forever")])
+    assert result.skipped == 1
+    row = db_session.exec(select(Document)).one()
+    assert row.scope == "universal"
+    assert row.session_id is None

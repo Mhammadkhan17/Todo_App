@@ -110,3 +110,63 @@ def test_chatbot_search_similar_shape():
     results = bot.search_similar("budget", "1")
     assert results[0]["metadata"]["file_name"] == "budget.txt"
     assert isinstance(results[0]["content"], str)
+
+
+def test_search_kwargs_adds_document_allowlist():
+    kwargs = _search_kwargs("7", document_ids=["d1", "d2"])
+    assert [c.key for c in kwargs["filter"].must] == [
+        "metadata.user_id",
+        "metadata.document_id",
+    ]
+    assert kwargs["filter"].must[1].match.any == ["d1", "d2"]
+
+
+def _scoped_docs():
+    return [
+        Document(
+            page_content="alpha keeps budget notes",
+            metadata={"user_id": "1", "file_name": "a.txt", "document_id": "doc-a"},
+        ),
+        Document(
+            page_content="beta keeps budget archive",
+            metadata={"user_id": "1", "file_name": "b.txt", "document_id": "doc-b"},
+        ),
+    ]
+
+
+def test_chain_respects_document_allowlist():
+    store = InMemoryStore(_scoped_docs())
+    echo = EchoLLM()
+    chain = create_rag_chain("1", store=store, llm=echo)
+    out = chain("budget notes", document_ids=["doc-a"])
+    assert [s["metadata"]["file_name"] for s in out["sources"]] == ["a.txt"]
+
+
+def test_chain_empty_allowlist_skips_store_entirely():
+    class ExplodingStore(InMemoryStore):
+        def similarity_search_with_score(self, *args, **kwargs):
+            raise AssertionError("store must not be queried with an empty allow-list")
+
+    store = ExplodingStore(_scoped_docs())
+    echo = EchoLLM()
+    chain = create_rag_chain("1", store=store, llm=echo)
+    out = chain("budget notes", document_ids=[])
+    assert out["sources"] == []
+    assert "(no documents found)" in echo.prompts[-1][0].content
+
+
+def test_chatbot_generate_response_passes_allowlist_through():
+    store = InMemoryStore(_scoped_docs())
+    bot = RAGChatbot(
+        store=store,
+        chain_factory=lambda user_id, **kw: create_rag_chain(
+            user_id, store=store, llm=EchoLLM(reply="ok")
+        ),
+    )
+    out = bot.generate_response("budget notes", "1", document_ids=["doc-b"])
+    assert [s["metadata"]["file_name"] for s in out["sources"]] == ["b.txt"]
+
+
+def test_search_similar_empty_allowlist_returns_empty():
+    bot = RAGChatbot(store=InMemoryStore(_scoped_docs()))
+    assert bot.search_similar("budget", "1", document_ids=[]) == []

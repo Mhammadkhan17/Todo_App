@@ -55,6 +55,16 @@ class InMemoryStore:
                 }
                 if wanted and str(doc.metadata.get("user_id")) not in wanted:
                     continue
+                allow_ids = [
+                    set(c.match.any)
+                    for c in filter.must
+                    if c.key == "metadata.document_id"
+                    and isinstance(c.match, models.MatchAny)
+                ]
+                if allow_ids and str(doc.metadata.get("document_id")) not in (
+                    set().union(*allow_ids)
+                ):
+                    continue
             overlap = len(
                 set(query_lower.split()) & set(doc.page_content.lower().split())
             )

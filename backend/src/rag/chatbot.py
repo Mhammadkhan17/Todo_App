@@ -22,17 +22,28 @@ class RAGChatbot:
             self._chains[user_id] = factory(user_id, **kwargs)
         return self._chains[user_id]
 
-    def generate_response(self, query: str, user_id: str) -> dict[str, Any]:
-        return self._chain(user_id)(query)
+    def generate_response(
+        self,
+        query: str,
+        user_id: str,
+        document_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._chain(user_id)(query, document_ids=document_ids)
 
     def search_similar(
-        self, query: str, user_id: str, k: int = 5
+        self,
+        query: str,
+        user_id: str,
+        k: int = 5,
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if document_ids is not None and not document_ids:
+            return []
         if self._store is None:
             from .store import get_vectorstore
 
             self._store = get_vectorstore()
         hits = self._store.similarity_search_with_score(
-            query, **_search_kwargs(user_id, k)
+            query, **_search_kwargs(user_id, k, document_ids=document_ids)
         )
         return hits_to_sources(hits)

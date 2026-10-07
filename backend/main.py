@@ -73,6 +73,10 @@ async def lifespan(app: FastAPI):
         database_engine.create_all_tables()
         logger.info("Database tables verified/created")
 
+        # Additive columns create_all cannot add to existing tables
+        database_engine.ensure_rag_document_columns()
+        logger.info("RAG document schema verified/updated")
+
     except Exception as e:
         logger.error(f"Startup failed: {e}")
         raise
