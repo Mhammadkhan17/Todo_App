@@ -20,7 +20,7 @@ from ..llm.provider import resolve_llm
 
 load_dotenv()
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat")
 
 
 class ChatRequest(BaseModel):
