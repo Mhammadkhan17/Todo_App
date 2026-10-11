@@ -23,7 +23,7 @@
 - **Statistics** — per-user totals, active/completed/overdue counts, priority breakdown, and completion rate.
 - **Dashboard** — filter tabs (all/pending/completed), search, sorting, recent activity, and an inline task form.
 - **AI chat assistant** — LLM function-calling over task tools (`add_task`, `list_tasks`, `complete_task`, `delete_task`, `update_task`), embedded as a widget on every main page; replies gracefully with a "not configured" message when no AI provider key is set.
-- **RAG document chat** — upload PDF/TXT/MD/DOCX (≤ 10 MB), chunked and embedded with a local ONNX MiniLM-L6-v2 model, indexed per-user in Qdrant, with grounded answers and `{file_name, score}` sources on the `/chat` page.
+- **RAG document chat** — upload PDF/TXT/MD/DOCX (≤ 10 MB), chunked and embedded with a local ONNX MiniLM-L6-v2 model, indexed per-user in Qdrant, with grounded answers and `{file_name, score}` sources. The full-screen `/chat` workspace offers a paperclip-based native file picker with a **Universal ⇄ This chat** scope chip, per-document keep-toggle and delete, and overlay drawers for grouped history and the document registry.
 - **MCP server** — the same five tools exposed over stdio for use with MCP-compatible clients.
 - **Security middleware** — rate limiting, security headers, CORS controls, input validation, trusted-host checks, and custom exception handlers.
 - **UI** — light/dark/system themes, animated transitions, and an accessibility panel (font scaling, high contrast, reduced motion).
@@ -70,7 +70,7 @@ FastAPI backend (:8000)           — routers, security middleware, JWT deps
 ```
 
 - Routers are mounted under `/api` in `backend/main.py`; OpenAPI docs are served at `/api/docs`.
-- RAG pipeline: upload → extract (pypdf/text) → chunk (1000/200) → ONNX embed → Qdrant upsert with `metadata.user_id`; chat retrieves the top-5 chunks filtered by the caller's user id and answers from a grounded prompt.
+- RAG pipeline: upload → extract (pypdf/text) → chunk (1000/200) → ONNX embed → Qdrant upsert with `metadata.user_id`; chat retrieves the top-5 chunks filtered by the caller's user id **and** an SQL-computed allow-list of active, in-scope documents (universal, or chat-scoped and bound to the session) before answering from a grounded prompt.
 - Frontend route protection lives in `frontend/src/proxy.ts` (middleware) plus `ProtectedRoute` components.
 - Tables are created automatically at startup; there is no migration directory yet.
 
@@ -167,13 +167,15 @@ All application routes are prefixed with `/api`. Routes marked **Bearer** requir
 | PATCH | `/api/{user_id}/tasks/{task_id}/complete` | Toggle completion | Bearer |
 | POST | `/api/chat` | AI assistant (LLM + tool calls) | Bearer |
 | GET | `/api/chat/conversations` | List conversations | Bearer |
-| POST | `/api/rag/chat` | Grounded RAG answer with sources (task commands share this route) | Bearer |
-| POST | `/api/rag/upload-and-index` | Multipart upload → extract, chunk, embed, index | Bearer |
-| GET | `/api/rag/search?query=` | Similarity search over the caller's corpus only | Bearer |
+| POST | `/api/rag/chat` | Grounded RAG answer with sources (task commands share this route; `document_ids` binds pending chat-scoped docs) | Bearer |
+| POST | `/api/rag/upload-and-index` | Multipart upload → extract, chunk, embed, index (form: `scope` = `universal`\|`chat`, optional `session_id`) | Bearer |
+| GET | `/api/rag/search?query=` | Similarity search over the caller's kept documents only | Bearer |
 | GET | `/api/rag/sessions` | List chat sessions | Bearer |
 | POST | `/api/rag/sessions` | Create a chat session | Bearer |
 | GET | `/api/rag/sessions/{id}/messages` | Messages of one session (owner only) | Bearer |
 | GET | `/api/rag/documents` | List the caller's indexed documents | Bearer |
+| PATCH | `/api/rag/documents/{id}` | Keep-toggle: `is_active` false = kept in library, excluded from retrieval | Bearer |
+| DELETE | `/api/rag/documents/{id}` | Delete one document (chunks, stored file, row) | Bearer |
 | DELETE | `/api/rag/reset-index` | Clear the caller's chunks and document rows | Bearer |
 | GET | `/health` | Health check | Public |
 
@@ -227,7 +229,7 @@ curl -s -X POST http://localhost:8000/api/rag/chat \
 #   → answer + sources[0].metadata.file_name == "notes.txt"
 ```
 
-In the UI: **`/chat`** → drop a file into *Document Upload* → ask a question; the reply carries a `Sources [n]` chip. Each user only ever retrieves their own documents (`metadata.user_id` filter).
+In the UI: **`/chat`** → attach files with the composer's paperclip (choose **All_Chats** or **This_Chat** with the scope chip — chat-scoped uploads bind to the conversation on your first message) → ask a question; the reply carries a `Sources [n]` chip. The clock icon opens grouped conversation history (Today / Yesterday / Last 7 days / Earlier); the file icon opens the document registry with status and scope badges, a keep-toggle, and per-row delete. Each user only ever retrieves their own documents (`metadata.user_id` filter plus the per-session allow-list).
 
 ## Configuration
 
@@ -260,7 +262,7 @@ Set these in `.env` (copy `.env.example` to `.env` and fill it in), as shell env
 
 ```bash
 cd backend
-pytest tests/ -v --tb=short     # 69 tests: auth, tasks, security, health, RAG (unit + route)
+pytest tests/ -v --tb=short     # 85 tests: auth, tasks, security, health, RAG (unit + route)
 ```
 
 > Two embedding tests skip until the model is fetched (`scripts/fetch_embeddings_model.py`) and `onnxruntime`/`tokenizers` are installed.
@@ -316,7 +318,7 @@ Todo_App/
 │   │   ├── security/         # middleware, CORS, validation, config
 │   │   ├── rag/              # chain, chatbot, ingestion, embeddings, Qdrant store
 │   │   └── schemas/          # Pydantic request/response schemas
-│   └── tests/                # pytest suite (69 tests, tests/rag/ for the RAG subsystem)
+│   └── tests/                # pytest suite (85 tests, tests/rag/ for the RAG subsystem)
 ├── frontend/                 # Next.js app
 │   └── src/
 │       ├── app/              # routes: auth, dashboard, tasks, stats, chat, settings
