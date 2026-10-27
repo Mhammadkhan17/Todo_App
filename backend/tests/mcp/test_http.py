@@ -124,7 +124,7 @@ async def test_http_tools_scope_to_token_subject(http_app, test_db):
             assert [t["title"] for t in _payload(result)["tasks"]] == ["Alice task"]
 
             tools = await alice_client.list_tools()
-            assert len(tools.tools) == 8
+            assert len(tools.tools) == 10
             schemas = json.dumps(
                 [t.model_dump(mode="json", by_alias=True) for t in tools.tools]
             )

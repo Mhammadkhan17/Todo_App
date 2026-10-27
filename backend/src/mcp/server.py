@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date, datetime, timezone
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from dotenv import load_dotenv
 
@@ -12,13 +12,17 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from src.database.engine import database_engine
 from src.exceptions.custom_exceptions import TodoException
 from src.mcp.identity import resolve_user_id
+from src.models.rag import Document
 from src.models.task import Priority, Status
 from src.services.task_service import TaskService
+
+if TYPE_CHECKING:
+    from src.rag.chatbot import RAGChatbot
 
 SessionFactory = Callable[[], AbstractContextManager[Session]]
 
@@ -40,6 +44,7 @@ def create_server(
     *,
     token_verifier: TokenVerifier | None = None,
     auth: AuthSettings | None = None,
+    rag: "RAGChatbot | None" = None,
 ) -> MCPServer:
     factory = session_factory or database_engine.get_session
     mcp = MCPServer(
@@ -47,8 +52,8 @@ def create_server(
         title="TodoFlow",
         version="1.0.0",
         instructions=(
-            "Manage the authenticated user's tasks. Every tool is already scoped "
-            "to that user. Never ask for a user id."
+            "Manage the authenticated user's tasks and indexed documents. "
+            "Every tool is already scoped to that user. Never ask for a user id."
         ),
         token_verifier=token_verifier,
         auth=auth,
@@ -345,6 +350,61 @@ def create_server(
                 due = f" (due {task.due_date})" if task.due_date else ""
                 lines.append(f"- {task.title}{due}")
             return "\n".join(lines)
+
+        return run(action)
+
+    # --- RAG tools (read-only) ------------------------------------------
+
+    def active_document_ids(session: Session, user_id: str) -> list[str]:
+        """Same retrieval allow-list as /api/rag: this user's active documents."""
+        rows = session.exec(
+            select(Document.id)
+            .where(Document.user_id == user_id)
+            .where(Document.is_active.is_(True))
+        ).all()
+        return [str(row_id) for row_id in rows]
+
+    def rag_bot():
+        if rag is not None:
+            return rag
+        from src.rag.chatbot import RAGChatbot  # lazy: keeps stdio startup light
+
+        return RAGChatbot()
+
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+    async def todo_search_documents(query: str, limit: int = 5) -> dict:
+        """Semantic search across the signed-in user's indexed documents."""
+
+        def action(session: Session) -> dict:
+            user_id = str(resolve_user_id())
+            allowed = active_document_ids(session, user_id)
+            try:
+                results = rag_bot().search_similar(
+                    query, user_id, k=limit, document_ids=allowed
+                )
+            except Exception as exc:
+                raise ToolError(str(exc)) from exc
+            return {"query": query, "results": results}
+
+        return run(action)
+
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+    async def todo_ask_documents(question: str) -> dict:
+        """Answer a question grounded only in the signed-in user's documents."""
+
+        def action(session: Session) -> dict:
+            user_id = str(resolve_user_id())
+            allowed = active_document_ids(session, user_id)
+            try:
+                outcome = rag_bot().generate_response(
+                    question, user_id, document_ids=allowed
+                )
+            except Exception as exc:
+                raise ToolError(str(exc)) from exc
+            return {
+                "response": outcome["response"],
+                "sources": outcome.get("sources", []),
+            }
 
         return run(action)
 

@@ -12,7 +12,13 @@ from src.models.user import User
 
 
 @pytest.fixture
-def mcp_server(test_db, monkeypatch):
+def mcp_rag():
+    """RAG chatbot injected into create_server(); override to inject fakes."""
+    return
+
+
+@pytest.fixture
+def mcp_server(test_db, monkeypatch, mcp_rag):
     from tests.helpers import create_user
 
     with Session(test_db) as setup:
@@ -29,7 +35,7 @@ def mcp_server(test_db, monkeypatch):
         finally:
             session.close()
 
-    return create_server(session_factory)
+    return create_server(session_factory, rag=mcp_rag)
 
 
 def payload(result):

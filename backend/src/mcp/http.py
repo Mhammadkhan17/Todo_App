@@ -18,6 +18,7 @@ Configuration (environment variables):
     MCP_HTTP_HOST          Bind host, default 127.0.0.1
     MCP_HTTP_PORT          Bind port, default 8001
 """
+
 import os
 
 import uvicorn

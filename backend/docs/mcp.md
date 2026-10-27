@@ -45,6 +45,14 @@ MCP_USER_ID=1 .venv/bin/python -m src.mcp.server
 | `todo_reopen_task` | no | no | Mark active |
 | `todo_delete_task` | no | yes | Permanently delete |
 | `todo_summary` | yes | no | Counts and overdue total |
+| `todo_search_documents` | yes | no | Semantic search over indexed documents |
+| `todo_ask_documents` | yes | no | Grounded answer over indexed documents |
+
+RAG tools use the same per-user scoping as `/api/rag`: the retrieval
+allow-list is computed from the caller's active `Document` rows in SQL, and the
+vector store additionally filters `metadata.user_id`. They take no user id and
+never touch the network unless Qdrant/LLM is configured (`RAGChatbot` is
+lazily constructed; tests inject a fake via `create_server(..., rag=...)`).
 
 ## Resources (Phase 2)
 

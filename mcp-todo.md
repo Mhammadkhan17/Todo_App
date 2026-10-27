@@ -140,9 +140,21 @@
 
 ### 8.3 RAG tools
 
-- [ ] `todo_search_documents(query, limit)` backed by `src/rag/store.py`
-- [ ] `todo_ask_documents(question)` backed by `src/rag/chatbot.py`
-- [ ] Enforce per-user document scoping
+- [x] `todo_search_documents(query, limit)` backed by `src/rag/store.py`
+- [x] `todo_ask_documents(question)` backed by `src/rag/chatbot.py`
+- [x] Enforce per-user document scoping
+
+> Notes: both tools run inside `run()` with identity from `resolve_user_id()`
+> and the `/api/rag`-equivalent SQL allow-list (`active_document_ids`: active
+> `Document` rows for this user) passed as `document_ids` — the vector store
+> then double-filters on `metadata.user_id`. `RAGChatbot` is imported lazily
+> (stdio startup stays light) and built per call, mirroring REST's
+> `get_chatbot()`; `create_server(..., rag=...)` lets tests inject a fake
+> (`InMemoryStore` + `EchoLLM` chain). Store/LLM failures are wrapped in
+> `ToolError` so the model sees the message instead of a generic crash.
+> The `mcp_server` fixture gained an overridable `mcp_rag` dependency; tool
+> count is now 10 (`test_http.py` assertion updated 8 → 10).
+> Full suite: 120 passed + 3 known security failures.
 
 ### 8.4 Evaluation suite
 
