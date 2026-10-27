@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MCP evaluation suite for the todoflow server (Phase 2.4).
+
+  Deterministic seed, created fresh before every case by test_evaluations.py:
+    1. Pay electricity bill  HIGH     ACTIVE    due 2000-01-15 (always overdue)
+    2. Buy groceries         MEDIUM   ACTIVE    due 2099-12-31 (always future)
+    3. Call the dentist      LOW      ACTIVE    no due date
+    4. Renew passport        HIGH     COMPLETED due 2000-01-20
+    5. Water the plants      MEDIUM   COMPLETED no due date
+
+  Each evaluation is read-only: one tool call, one expected value located at
+  `path` (dot path; a numeric segment indexes an array). Comparison is exact
+  string equality after str() coercion, so answers stay single and verifiable.
+-->
+<mcp-evaluations server="todoflow" version="1.0.0">
+  <evaluation id="01" name="total-task-count">
+    <question>How many tasks does the user have in total?</question>
+    <call tool="todo_summary">{}</call>
+    <expect path="total">5</expect>
+  </evaluation>
+
+  <evaluation id="02" name="active-task-count">
+    <question>How many tasks are active?</question>
+    <call tool="todo_summary">{}</call>
+    <expect path="active">3</expect>
+  </evaluation>
+
+  <evaluation id="03" name="completed-task-count">
+    <question>How many tasks are completed?</question>
+    <call tool="todo_summary">{}</call>
+    <expect path="completed">2</expect>
+  </evaluation>
+
+  <evaluation id="04" name="overdue-task-count">
+    <question>How many active tasks are overdue?</question>
+    <call tool="todo_summary">{}</call>
+    <expect path="overdue">1</expect>
+  </evaluation>
+
+  <evaluation id="05" name="high-priority-total">
+    <question>How many high-priority tasks are there?</question>
+    <call tool="todo_list_tasks">{"priority": "high"}</call>
+    <expect path="total">2</expect>
+  </evaluation>
+
+  <evaluation id="06" name="low-priority-task-title">
+    <question>What is the title of the only low-priority task?</question>
+    <call tool="todo_list_tasks">{"priority": "low"}</call>
+    <expect path="tasks.0.title">Call the dentist</expect>
+  </evaluation>
+
+  <evaluation id="07" name="passport-status">
+    <question>Is the passport task active or completed?</question>
+    <call tool="todo_list_tasks">{"search": "passport"}</call>
+    <expect path="tasks.0.status">COMPLETED</expect>
+  </evaluation>
+
+  <evaluation id="08" name="groceries-priority">
+    <question>What priority is the groceries task?</question>
+    <call tool="todo_list_tasks">{"search": "groceries"}</call>
+    <expect path="tasks.0.priority">MEDIUM</expect>
+  </evaluation>
+
+  <evaluation id="09" name="active-plants-search-count">
+    <question>How many active tasks match the search "plants"?</question>
+    <call tool="todo_list_tasks">{"search": "plants", "status": "active"}</call>
+    <expect path="total">0</expect>
+  </evaluation>
+
+  <evaluation id="10" name="high-completed-title">
+    <question>Which completed task is high priority?</question>
+    <call tool="todo_list_tasks">{"status": "completed", "priority": "high"}</call>
+    <expect path="tasks.0.title">Renew passport</expect>
+  </evaluation>
+</mcp-evaluations>

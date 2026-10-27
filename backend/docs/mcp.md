@@ -115,10 +115,28 @@ Requests without a valid, unexpired token get `401 Unauthorized`. The
 process clears `MCP_USER_ID` on startup so HTTP identity can only ever come
 from the bearer token.
 
+## Evaluation suite (Phase 2)
+
+`tests/mcp/evaluations.xml` holds ten read-only evaluation questions with
+single verifiable answers (counts, titles, priorities, statuses), documented
+against a deterministic five-task seed (fixed due dates in 2000/2099 so
+overdue math never drifts). `tests/mcp/test_evaluations.py` re-seeds those
+five tasks per case and runs every question through a scripted MCP `Client`:
+
+```bash
+cd backend
+.venv/bin/python -m pytest tests/mcp/test_evaluations.py -v
+```
+
+Each case is one tool call and one exact expected value at a dot path (e.g.
+`tasks.0.title`), so a regression fails precisely the question it breaks.
+
 ## Security
 
 - Tools never accept a user id.
 - stdio identity comes from `MCP_USER_ID`.
 - HTTP identity comes from a verified bearer token subject; missing,
   invalid, or expired tokens are rejected with `401`.
+- RAG tools scope retrieval with the SQL active-document allow-list plus a
+  `metadata.user_id` store filter (same as `/api/rag`).
 - `todo_delete_task` is permanent and cannot be undone.

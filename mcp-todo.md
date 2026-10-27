@@ -158,10 +158,18 @@
 
 ### 8.4 Evaluation suite
 
-- [ ] Seed deterministic database with five tasks
-- [ ] Create ten read-only evaluation questions with verifiable answers
-- [ ] Run through MCP Inspector or scripted `ClientSession`
-- [ ] Store as `backend/tests/mcp/evaluations.xml`
+- [x] Seed deterministic database with five tasks
+- [x] Create ten read-only evaluation questions with verifiable answers
+- [x] Run through MCP Inspector or scripted `ClientSession`
+- [x] Store as `backend/tests/mcp/evaluations.xml`
+
+> Notes: `evaluations.xml` is the question bank (tool + args + dot-path
+> expected value per case, seed documented in its header comment; due dates
+> fixed at 2000/2099 so overdue counts never drift). `test_evaluations.py`
+> loads it at import, re-seeds the five tasks per case (the autouse
+> `_clean_tasks` fixture wipes tasks between cases), and runs each through a
+> scripted `Client` — the plan's ClientSession alternative. All ten pass.
+> Full suite: 130 passed + 3 known security failures.
 
 ### 8.5 Chat as an MCP client
 
