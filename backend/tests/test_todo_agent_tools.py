@@ -40,9 +40,7 @@ def chat_db(test_db, monkeypatch):
         finally:
             session.close()
 
-    monkeypatch.setattr(
-        "src.agents.todo_agent.database_engine.get_session", _session
-    )
+    monkeypatch.setattr("src.agents.todo_agent.database_engine.get_session", _session)
     return test_db
 
 
@@ -67,9 +65,7 @@ def test_add_list_update_complete_delete_via_taskservice(chat_db):
         assert stored.title == "Renamed"
         assert stored.user_id == user.id
 
-    completed = call_mcp_tool(
-        "complete_task", {"user_id": uid, "task_id": task_id}
-    )
+    completed = call_mcp_tool("complete_task", {"user_id": uid, "task_id": task_id})
     assert completed["status"] == "completed"
 
     listed = call_mcp_tool("list_tasks", {"user_id": uid, "status": "completed"})
