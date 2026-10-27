@@ -83,6 +83,16 @@ def _clean_tasks(test_db):
 
 
 @pytest.fixture
+def db_session(test_db):
+    """Yield a SQLModel session bound to the shared in-memory test database."""
+    session = Session(bind=test_db)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
 def sample_user_data():
     """Sample user data for testing."""
     return {
