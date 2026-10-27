@@ -42,7 +42,7 @@ def test_chat_requires_auth(client):
 
 
 def test_chat_task_intent_keeps_existing_branch(
-    client, auth_headers, fake_chatbot, monkeypatch
+    client, auth_headers, auth_user_id, fake_chatbot, monkeypatch
 ):
     monkeypatch.setattr(
         rag_router,
@@ -55,7 +55,7 @@ def test_chat_task_intent_keeps_existing_branch(
         headers=auth_headers,
     )
     assert response.status_code == 200
-    assert "tasks for 1" in response.json()["response"]
+    assert f"tasks for {auth_user_id}" in response.json()["response"]
     assert fake_chatbot.responses == []  # RAG branch not consulted
 
 
@@ -82,7 +82,7 @@ def test_upload_rejects_bad_extension(client, auth_headers):
 
 
 def test_upload_indexes_for_current_user(
-    client, auth_headers, qdrant_client, tmp_path, db_session
+    client, auth_headers, auth_user_id, qdrant_client, tmp_path, db_session
 ):
     app.dependency_overrides[rag_router.get_ingestor] = lambda: DocumentIngestor(
         client=qdrant_client, embedder=FakeEmbedder(), uploads_dir=tmp_path / "uploads"
@@ -102,7 +102,7 @@ def test_upload_indexes_for_current_user(
 
         points, _ = qdrant_client.scroll(collection_name(), limit=10, with_payload=True)
         assert points
-        assert points[0].payload["metadata"]["user_id"] == "1"
+        assert points[0].payload["metadata"]["user_id"] == auth_user_id
         assert points[0].payload["metadata"]["file_name"] == "notes.txt"
     finally:
         app.dependency_overrides.pop(rag_router.get_ingestor, None)
@@ -138,7 +138,8 @@ class ScopedSearchBot:
 
 
 def test_search_is_scoped_to_requesting_user(
-    client, auth_headers, qdrant_client, db_session
+    client, auth_headers, auth_user_id, other_user_headers, other_user_id,
+    qdrant_client, db_session
 ):
     ensure_collection(client=qdrant_client)
     store = QdrantVectorStore(
@@ -151,7 +152,7 @@ def test_search_is_scoped_to_requesting_user(
             LCDocument(
                 page_content="alpha notes for user one",
                 metadata={
-                    "user_id": "1",
+                    "user_id": auth_user_id,
                     "file_name": "one.txt",
                     "document_id": "doc-one",
                 },
@@ -159,7 +160,7 @@ def test_search_is_scoped_to_requesting_user(
             LCDocument(
                 page_content="alpha notes for user two",
                 metadata={
-                    "user_id": "2",
+                    "user_id": other_user_id,
                     "file_name": "two.txt",
                     "document_id": "doc-two",
                 },
@@ -172,8 +173,8 @@ def test_search_is_scoped_to_requesting_user(
     )
     # Retrieval allow-lists come from SQL: give both points document rows
     for doc_id, user_id, name in (
-        ("doc-one", "1", "one.txt"),
-        ("doc-two", "2", "two.txt"),
+        ("doc-one", auth_user_id, "one.txt"),
+        ("doc-two", other_user_id, "two.txt"),
     ):
         db_session.add(
             Document(
@@ -378,7 +379,7 @@ def test_upload_scope_chat_requires_owned_session(
 
 
 def test_chat_binds_pending_documents_and_passes_allowlist(
-    client, auth_headers, fake_chatbot, ingest_override
+    client, auth_headers, auth_user_id, fake_chatbot, ingest_override
 ):
     upload = _upload(client, auth_headers, data={"scope": "chat"})
     assert upload.status_code == 200
@@ -404,7 +405,7 @@ def test_chat_binds_pending_documents_and_passes_allowlist(
 
     # Retrieval allow-list handed to the chatbot contains the bound doc
     _query, user_id, allowed = fake_chatbot.responses[0]
-    assert user_id == "1"
+    assert user_id == auth_user_id
     assert allowed == [doc_id]
 
 

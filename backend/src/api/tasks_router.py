@@ -2,23 +2,21 @@
 """Tasks API Router."""
 
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from src.dependencies.auth import get_current_user
 from src.database.session import get_session
+from src.dependencies.auth import get_current_user
 from src.models.task import Priority, Status
 from src.schemas.task import (
-    TaskCreate,
-    TaskUpdate,
-    TaskResponse,
-    TaskListResponse,
     TaskCompletionToggle,
+    TaskCreate,
+    TaskListResponse,
+    TaskResponse,
+    TaskUpdate,
 )
 from src.services.task_service import TaskService
-
 
 router = APIRouter()
 
@@ -36,11 +34,11 @@ async def list_tasks(
     user_id: int,
     current_user=Depends(get_current_user),
     session: Session = Depends(get_session),
-    status_filter: Optional[Status] = Query(None, description="Filter by task status"),
-    priority: Optional[Priority] = Query(None, description="Filter by task priority"),
-    due_date_from: Optional[date] = Query(None, description="Filter tasks due from this date"),
-    due_date_to: Optional[date] = Query(None, description="Filter tasks due to this date"),
-    search: Optional[str] = Query(None, description="Search in title and description"),
+    status_filter: Status | None = Query(None, description="Filter by task status"),
+    priority: Priority | None = Query(None, description="Filter by task priority"),
+    due_date_from: date | None = Query(None, description="Filter tasks due from this date"),
+    due_date_to: date | None = Query(None, description="Filter tasks due to this date"),
+    search: str | None = Query(None, description="Search in title and description"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(10, ge=1, le=100, description="Items per page"),
 ):

@@ -7,7 +7,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from sqlmodel import Session
 
 from src.mcp.server import create_server
-from src.models.task import Priority, Status
+from src.models.task import Priority
 from src.models.user import User
 from src.services.task_service import TaskService
 from tests.helpers import create_user

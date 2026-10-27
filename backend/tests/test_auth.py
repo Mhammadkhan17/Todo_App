@@ -5,9 +5,7 @@ Test authentication endpoints
 Tests for user registration, login, and authentication functionality.
 """
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 
 def test_register_user(client: TestClient, sample_user_data: dict):

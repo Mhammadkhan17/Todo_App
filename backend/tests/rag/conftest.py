@@ -94,4 +94,17 @@ def auth_headers(make_user):
 
 @pytest.fixture
 def other_user_headers(make_user):
+    # unique creds so we never collide with tests/test_auth.py's sample user
     return make_user("ragother", "rag-other@example.com")
+
+
+@pytest.fixture
+def auth_user_id(auth_headers) -> str:
+    # Numeric ids are order-dependent (shared session-scoped DB), so derive the
+    # requesting user's id from the registration response instead of "1".
+    return str(_REGISTERED["raguser"]["id"])
+
+
+@pytest.fixture
+def other_user_id(other_user_headers) -> str:
+    return str(_REGISTERED["ragother"]["id"])

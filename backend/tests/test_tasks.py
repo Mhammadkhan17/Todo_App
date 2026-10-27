@@ -5,9 +5,7 @@ Test task endpoints
 Tests for task CRUD operations and filtering.
 """
 
-import pytest
 from fastapi.testclient import TestClient
-from datetime import date
 
 
 def test_create_task(client: TestClient, sample_user_data: dict, sample_task_data: dict):

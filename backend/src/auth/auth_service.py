@@ -6,20 +6,16 @@ Handles JWT token generation, verification, and user authentication.
 """
 
 import os
-import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-from jose import JWTError, jwt
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.schemas.user import TokenData
-from src.models.user import User
-from src.database.session import get_session
 from src.auth.jwt_service import JWTService
 from src.database.engine import database_engine
-
-
+from src.database.session import get_session
+from src.models.user import User
+from src.schemas.user import TokenData
 
 # JWT configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY", "todo_app_secret_key_change_in_production")
@@ -41,7 +37,7 @@ class AuthService:
         return JWTService.get_password_hash(password)
 
     @staticmethod
-    def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> dict:
+    def create_access_token(data: dict, expires_delta: timedelta | None = None) -> dict:
         """Create a JWT access token with enhanced security."""
         return JWTService.create_access_token(data, expires_delta)
 
@@ -51,7 +47,7 @@ class AuthService:
         return JWTService.verify_access_token(token)
 
     @staticmethod
-    def _authenticate(session: Session, username: str, password: str) -> Optional[User]:
+    def _authenticate(session: Session, username: str, password: str) -> User | None:
         user = session.query(User).filter(
             (User.username == username) | (User.email == username)
         ).first()
@@ -86,51 +82,51 @@ class AuthService:
     def authenticate_user(
         username: str,
         password: str,
-        session: Optional[Session] = None,
-    ) -> Optional[User]:
+        session: Session | None = None,
+    ) -> User | None:
         try:
             if session is not None:
                 return AuthService._authenticate(session, username, password)
             with database_engine.get_session() as own_session:
                 return AuthService._authenticate(own_session, username, password)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - map any failure to HTTP 500
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Authentication failed: {str(e)}",
+                detail=f"Authentication failed: {e!s}",
             )
 
     @staticmethod
-    def get_user_by_id(user_id: int) -> Optional[User]:
+    def get_user_by_id(user_id: int) -> User | None:
         """Get user by ID."""
         try:
             with get_session() as session:
                 user = session.query(User).filter(User.id == user_id).first()
                 return user
-        except Exception:
+        except Exception:  # noqa: BLE001 - lookup helper: treat any failure as "not found"
             return None
 
     @staticmethod
-    def get_user_by_username(username: str) -> Optional[User]:
+    def get_user_by_username(username: str) -> User | None:
         """Get user by username."""
         try:
             with get_session() as session:
                 user = session.query(User).filter(User.username == username).first()
                 return user
-        except Exception:
+        except Exception:  # noqa: BLE001 - lookup helper: treat any failure as "not found"
             return None
 
     @staticmethod
-    def get_user_by_email(email: str) -> Optional[User]:
+    def get_user_by_email(email: str) -> User | None:
         """Get user by email."""
         try:
             with get_session() as session:
                 user = session.query(User).filter(User.email == email).first()
                 return user
-        except Exception:
+        except Exception:  # noqa: BLE001 - lookup helper: treat any failure as "not found"
             return None
 
     @staticmethod
-    def create_user(email: str, username: str, password: str, full_name: Optional[str] = None) -> User:
+    def create_user(email: str, username: str, password: str, full_name: str | None = None) -> User:
         """Create a new user."""
         try:
             with get_session() as session:
@@ -162,8 +158,8 @@ class AuthService:
 
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - map any failure to HTTP 500
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create user: {str(e)}"
+                detail=f"Failed to create user: {e!s}"
             )

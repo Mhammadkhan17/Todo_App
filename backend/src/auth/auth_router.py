@@ -5,19 +5,16 @@ Authentication Router
 FastAPI router for authentication endpoints.
 """
 
-from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi import Body
 from sqlalchemy.orm import Session
 
-from src.schemas.user import UserCreate, UserResponse, Token, UserLogin, TokenData
-from src.models.user import User
 from src.auth.auth_service import AuthService
 from src.auth.jwt_service import JWTService
 from src.database.session import get_session
 from src.dependencies import get_current_user
-
+from src.models.user import User
+from src.schemas.user import Token, UserCreate, UserLogin, UserResponse
 
 router = APIRouter()
 
@@ -54,11 +51,11 @@ async def register_user(user_data: UserCreate, session: Session = Depends(get_se
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - map failure to an HTTP error response
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to register user: {str(e)}"
+            detail=f"Failed to register user: {e!s}"
         )
 
 
@@ -166,7 +163,7 @@ async def refresh_token(refresh_token: str = Body(..., embed=True)):
                 algorithms=[SecurityConfig.ALGORITHM]
             )
             user_id = payload.get("user_id")
-        except Exception:
+        except Exception:  # noqa: BLE001 - degrade to a safe auth failure response
             raise AuthenticationException("Invalid refresh token")
 
         return {
@@ -177,10 +174,10 @@ async def refresh_token(refresh_token: str = Body(..., embed=True)):
             "user_id": user_id,
             "expires_at": token_response.get("expires_at")
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - map failure to an HTTP error response
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token refresh failed: {str(e)}",
+            detail=f"Token refresh failed: {e!s}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -211,7 +208,7 @@ async def revoke_token(
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:  # noqa: BLE001 - degrade to a safe auth failure response
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid token"
@@ -229,6 +226,6 @@ async def verify_token(token: str = Body(..., embed=True)):
             "user_id": token_data.user_id,
             "message": "Token is valid"
         }
-    except Exception as e:
+    except Exception:  # noqa: BLE001 - degrade to a safe auth failure response
         # Don't expose internal error details
         return {"valid": False, "error": "Invalid token"}

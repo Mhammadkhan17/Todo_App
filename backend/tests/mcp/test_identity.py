@@ -1,5 +1,4 @@
 import pytest
-
 from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 

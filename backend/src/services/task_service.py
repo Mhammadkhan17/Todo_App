@@ -1,10 +1,12 @@
 from datetime import date, datetime, timezone
-from typing import Optional
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from src.exceptions.custom_exceptions import TaskNotFoundException, UserNotFoundException
+from src.exceptions.custom_exceptions import (
+    TaskNotFoundException,
+    UserNotFoundException,
+)
 from src.models.task import Priority, Status, Task
 from src.models.user import User
 
@@ -38,9 +40,9 @@ class TaskService:
         *,
         user_id: int,
         title: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         priority: Priority = Priority.MEDIUM,
-        due_date: Optional[date] = None,
+        due_date: date | None = None,
     ) -> Task:
         TaskService._require_user(session, user_id)
         task = Task(
@@ -61,11 +63,11 @@ class TaskService:
         session: Session,
         *,
         user_id: int,
-        status: Optional[Status] = None,
-        priority: Optional[Priority] = None,
-        due_date_from: Optional[date] = None,
-        due_date_to: Optional[date] = None,
-        search: Optional[str] = None,
+        status: Status | None = None,
+        priority: Priority | None = None,
+        due_date_from: date | None = None,
+        due_date_to: date | None = None,
+        search: str | None = None,
         page: int = 1,
         size: int = 10,
     ) -> tuple[list[Task], int]:
@@ -180,7 +182,7 @@ class TaskService:
             base.filter(
                 Task.status == Status.ACTIVE,
                 Task.due_date.is_not(None),
-                Task.due_date < date.today(),
+                Task.due_date < datetime.now(timezone.utc).date(),
             ).scalar()
             or 0
         )

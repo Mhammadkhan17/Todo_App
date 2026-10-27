@@ -2,94 +2,68 @@
 Todo Agent Implementation for Phase 3 using Model Context Protocol (MCP)
 Follows the specification from Hackathon II document for AI-powered todo chatbot.
 """
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
-import httpx
-import asyncio
-from sqlmodel import select
-from ..models.task import Task, Status as TaskStatus, Priority as TaskPriority
-from ..models.user import User
+
 from ..database.engine import database_engine
+from ..models.task import Status as TaskStatus
+from ..services.task_service import TaskService
 
 
 class AddTaskParams(BaseModel):
     user_id: str = Field(description="User ID")
     title: str = Field(description="Task title")
-    description: Optional[str] = Field(None, description="Task description")
+    description: str | None = Field(None, description="Task description")
 
 
-def add_task(params: AddTaskParams) -> Dict[str, Any]:
+def add_task(params: AddTaskParams) -> dict[str, Any]:
     """
     Create a new task with title and optional description
     """
     try:
         with database_engine.get_session() as db:
-            # Verify user exists
-            user = db.exec(select(User).where(User.id == int(params.user_id))).first()
-            if not user:
-                return {"error": "User not found", "status": "failed"}
-
-            # Create new task
-            task = Task(
+            task = TaskService.create(
+                db,
+                user_id=int(params.user_id),
                 title=params.title,
                 description=params.description,
-                user_id=int(params.user_id)
             )
-            db.add(task)
-            db.commit()
-            db.refresh(task)
-
             return {
                 "task_id": task.id,
                 "status": "created",
                 "title": task.title,
-                "user_id": params.user_id
+                "user_id": params.user_id,
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
         return {"error": str(e), "status": "failed"}
 
 
 class ListTasksParams(BaseModel):
     user_id: str = Field(description="User ID")
-    status: Optional[str] = Field(None, description="Filter by status: 'all', 'pending', 'completed'")
+    status: str | None = Field(None, description="Filter by status: 'all', 'pending', 'completed'")
 
 
-def list_tasks(params: ListTasksParams) -> List[Dict[str, Any]]:
+def list_tasks(params: ListTasksParams) -> list[dict[str, Any]]:
     """
     Retrieve tasks from the list with optional status filter
     """
     try:
         with database_engine.get_session() as db:
-            # Verify user exists
-            user = db.exec(select(User).where(User.id == int(params.user_id))).first()
-            if not user:
-                return [{"error": "User not found"}]
+            status = None
+            if params.status and params.status.lower() == "completed":
+                status = TaskStatus.COMPLETED
+            elif params.status and params.status.lower() == "pending":
+                status = TaskStatus.ACTIVE
 
-            # Build query
-            query = select(Task).where(Task.user_id == int(params.user_id))
-
-            if params.status:
-                if params.status.lower() == "completed":
-                    query = query.where(Task.status == TaskStatus.COMPLETED)
-                elif params.status.lower() == "pending":
-                    query = query.where(Task.status == TaskStatus.ACTIVE)
-
-            tasks = db.exec(query.order_by(Task.created_at.desc())).all()
-
-            return [
-                {
-                    "id": task.id,
-                    "title": task.title,
-                    "description": task.description,
-                    "status": task.status.value,
-                    "priority": task.priority.value,
-                    "due_date": task.due_date.isoformat() if task.due_date else None,
-                    "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-                    "created_at": task.created_at.isoformat()
-                }
-                for task in tasks
-            ]
-    except Exception as e:
+            tasks, _ = TaskService.list(
+                db,
+                user_id=int(params.user_id),
+                status=status,
+                size=100,
+            )
+            return [TaskService.to_dict(task) for task in tasks]
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
         return [{"error": str(e)}]
 
 
@@ -98,38 +72,25 @@ class CompleteTaskParams(BaseModel):
     task_id: int = Field(description="Task ID to mark as complete")
 
 
-def complete_task(params: CompleteTaskParams) -> Dict[str, Any]:
+def complete_task(params: CompleteTaskParams) -> dict[str, Any]:
     """
     Mark a task as complete by task_id
     """
     try:
         with database_engine.get_session() as db:
-            # Verify user exists
-            user = db.exec(select(User).where(User.id == int(params.user_id))).first()
-            if not user:
-                return {"error": "User not found", "status": "failed"}
-
-            # Find task and verify it belongs to the user
-            task = db.exec(
-                select(Task).where(Task.id == params.task_id).where(Task.user_id == int(params.user_id))
-            ).first()
-
-            if not task:
-                return {"error": "Task not found or doesn't belong to user", "status": "failed"}
-
-            # Mark as complete
-            task.toggle_completion()
-            db.add(task)
-            db.commit()
-            db.refresh(task)
-
+            task = TaskService.set_completed(
+                db,
+                user_id=int(params.user_id),
+                task_id=params.task_id,
+                completed=True,
+            )
             return {
                 "task_id": task.id,
                 "status": "completed",
                 "title": task.title,
-                "completed_at": task.completed_at.isoformat() if task.completed_at else None
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
         return {"error": str(e), "status": "failed"}
 
 
@@ -138,81 +99,56 @@ class DeleteTaskParams(BaseModel):
     task_id: int = Field(description="Task ID to delete")
 
 
-def delete_task(params: DeleteTaskParams) -> Dict[str, Any]:
+def delete_task(params: DeleteTaskParams) -> dict[str, Any]:
     """
     Remove a task from the list by task_id
     """
     try:
         with database_engine.get_session() as db:
-            # Verify user exists
-            user = db.exec(select(User).where(User.id == int(params.user_id))).first()
-            if not user:
-                return {"error": "User not found", "status": "failed"}
-
-            # Find task and verify it belongs to the user
-            task = db.exec(
-                select(Task).where(Task.id == params.task_id).where(Task.user_id == int(params.user_id))
-            ).first()
-
-            if not task:
-                return {"error": "Task not found or doesn't belong to user", "status": "failed"}
-
-            # Delete the task
-            db.delete(task)
-            db.commit()
-
+            TaskService.delete(
+                db,
+                user_id=int(params.user_id),
+                task_id=params.task_id,
+            )
             return {
                 "task_id": params.task_id,
                 "status": "deleted",
-                "title": task.title
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
         return {"error": str(e), "status": "failed"}
 
 
 class UpdateTaskParams(BaseModel):
     user_id: str = Field(description="User ID")
     task_id: int = Field(description="Task ID to update")
-    title: Optional[str] = Field(None, description="New task title")
-    description: Optional[str] = Field(None, description="New task description")
+    title: str | None = Field(None, description="New task title")
+    description: str | None = Field(None, description="New task description")
 
 
-def update_task(params: UpdateTaskParams) -> Dict[str, Any]:
+def update_task(params: UpdateTaskParams) -> dict[str, Any]:
     """
     Modify task title or description by task_id
     """
     try:
         with database_engine.get_session() as db:
-            # Verify user exists
-            user = db.exec(select(User).where(User.id == int(params.user_id))).first()
-            if not user:
-                return {"error": "User not found", "status": "failed"}
-
-            # Find task and verify it belongs to the user
-            task = db.exec(
-                select(Task).where(Task.id == params.task_id).where(Task.user_id == int(params.user_id))
-            ).first()
-
-            if not task:
-                return {"error": "Task not found or doesn't belong to user", "status": "failed"}
-
-            # Update fields if provided
+            changes = {}
             if params.title is not None:
-                task.title = params.title
+                changes["title"] = params.title
             if params.description is not None:
-                task.description = params.description
+                changes["description"] = params.description
 
-            task.updated_at = task.__class__.updated_at.field.default_factory()
-            db.add(task)
-            db.commit()
-            db.refresh(task)
-
+            task = TaskService.update(
+                db,
+                user_id=int(params.user_id),
+                task_id=params.task_id,
+                changes=changes,
+            )
             return {
                 "task_id": task.id,
                 "status": "updated",
-                "title": task.title
+                "title": task.title,
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
         return {"error": str(e), "status": "failed"}
 
 
@@ -229,7 +165,7 @@ def get_todo_tools():
     ]
 
 
-def get_todo_agent(openai_api_key: Optional[str] = None):
+def get_todo_agent(openai_api_key: str | None = None):
     """
     Create and return an agent with the todo management tools that integrates with MCP.
 
@@ -240,7 +176,7 @@ def get_todo_agent(openai_api_key: Optional[str] = None):
         Agent configured for todo management with MCP integration
     """
     # For MCP integration, we'll use the tools directly rather than OpenAI's function_tool
-    # The actual MCP server is in the mcp/todo_mcp_server.py file
+    # The actual MCP server is in the mcp/server.py file
     tools = get_todo_tools()
 
     # Agent instructions for the LLM
@@ -258,7 +194,7 @@ def get_todo_agent(openai_api_key: Optional[str] = None):
     }
 
 
-def process_natural_language_command(user_id: str, command: str, openai_api_key: Optional[str] = None) -> Dict[str, Any]:
+def process_natural_language_command(user_id: str, command: str, openai_api_key: str | None = None) -> dict[str, Any]:
     """
     Process a natural language command using MCP-integrated tools.
 
@@ -274,7 +210,7 @@ def process_natural_language_command(user_id: str, command: str, openai_api_key:
     # In a real MCP setup, the LLM would call the MCP server directly
     # For this implementation, we'll simulate the processing
 
-    # The actual MCP server is available at mcp/todo_mcp_server.py
+    # The actual MCP server is available at src/mcp/server.py
     # This function would typically make a call to that server
 
     # For now, we'll return a placeholder response that indicates
@@ -282,11 +218,11 @@ def process_natural_language_command(user_id: str, command: str, openai_api_key:
     return {
         "status": "mcp_integration_ready",
         "message": f"Command '{command}' would be processed by MCP server with user_id {user_id}",
-        "mcp_server": "available_at_/mcp/todo_mcp_server.py"
+        "mcp_server": "available_at_/src/mcp/server.py"
     }
 
 
-def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Call a specific MCP tool by name with given arguments.
 
@@ -330,5 +266,5 @@ def call_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             return tool_func(params)
         else:
             return {"error": f"Unknown tool: {tool_name}", "status": "failed"}
-    except Exception as e:
-        return {"error": f"Error calling tool {tool_name}: {str(e)}", "status": "failed"}
+    except Exception as e:  # noqa: BLE001 - chat tool contract: return an error dict, never raise
+        return {"error": f"Error calling tool {tool_name}: {e!s}", "status": "failed"}

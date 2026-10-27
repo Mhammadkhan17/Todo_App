@@ -1,6 +1,7 @@
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date
-from typing import Callable, Literal
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -16,7 +17,6 @@ from src.exceptions.custom_exceptions import TodoException
 from src.mcp.identity import resolve_user_id
 from src.models.task import Priority, Status
 from src.services.task_service import TaskService
-
 
 SessionFactory = Callable[[], AbstractContextManager[Session]]
 

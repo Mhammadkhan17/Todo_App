@@ -5,18 +5,16 @@ Test configuration and fixtures
 Shared test configuration and fixtures for the test suite.
 """
 
+
 import pytest
-import tempfile
-import os
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session
 
 from main import app
-from src.database.engine import database_engine
 from src.database.session import get_session
-from src.models import User, Task
+from src.models import Task, User
 
 
 def _allow_testclient_host() -> None:

@@ -24,7 +24,8 @@
 - **Dashboard** — filter tabs (all/pending/completed), search, sorting, recent activity, and an inline task form.
 - **AI chat assistant** — LLM function-calling over task tools (`add_task`, `list_tasks`, `complete_task`, `delete_task`, `update_task`), embedded as a widget on every main page; replies gracefully with a "not configured" message when no AI provider key is set.
 - **RAG document chat** — upload PDF/TXT/MD/DOCX (≤ 10 MB), chunked and embedded with a local ONNX MiniLM-L6-v2 model, indexed per-user in Qdrant, with grounded answers and `{file_name, score}` sources. The full-screen `/chat` workspace offers a paperclip-based native file picker with a **Universal ⇄ This chat** scope chip, per-document keep-toggle and delete, and overlay drawers for grouped history and the document registry.
-- **MCP server** — the same five tools exposed over stdio for use with MCP-compatible clients.
+- **MCP server** — eight task tools exposed over stdio for MCP-compatible clients
+  (`backend/src/mcp/server.py`, setup in `backend/docs/mcp.md`).
 - **Security middleware** — rate limiting, security headers, CORS controls, input validation, trusted-host checks, and custom exception handlers.
 - **UI** — light/dark/system themes, animated transitions, and an accessibility panel (font scaling, high contrast, reduced motion).
 
@@ -199,7 +200,11 @@ curl -s -X POST "http://localhost:8000/api/$USER_ID/tasks" \
 
 ### AI chat and MCP
 
-Chat requests to `POST /api/chat` are executed by `backend/src/agents/todo_agent.py`, which calls the same five tools the MCP server (`backend/src/mcp/todo_mcp_server.py`) exposes over stdio. Set an AI provider (see [Configuration](#configuration)) to enable real responses; without a key the endpoint returns a graceful "not configured" reply.
+Chat requests to `POST /api/chat` are executed by `backend/src/agents/todo_agent.py`,
+which calls the shared task service. The stdio MCP server at
+`backend/src/mcp/server.py` exposes the same operations to MCP-compatible clients.
+See `backend/docs/mcp.md` for client configuration. Without an AI provider key,
+the chat endpoint returns a graceful "not configured" reply.
 
 ### RAG document chat
 

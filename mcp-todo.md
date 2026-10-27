@@ -1,0 +1,135 @@
+# TodoFlow MCP Implementation Checklist
+
+> Implementation tracker for `plan/MCP_IMPLEMENTATION_PLAN.md`. Check off each step as it completes.
+
+---
+
+## Phase 1: MVP (stdio MCP server)
+
+### Task 1: Fix authentication session isolation
+
+- [x] Step 1: Confirm the failing baseline (`test_login_user` fails with 401)
+- [x] Step 2: Add injectable session path to `AuthService.authenticate_user`
+- [x] Step 3: Pass request session into both login endpoints
+- [x] Step 4: Run auth and task tests — all pass
+- [x] Step 5: Commit `fix(auth): use request session for login authentication`
+
+### Task 2: Create the shared TaskService
+
+- [x] Step 1: Add `db_session` fixture to conftest + create `tests/helpers.py` + test package inits
+- [x] Step 2: Write failing service tests (7 tests)
+- [x] Step 3: Run tests to verify they fail (ModuleNotFoundError)
+- [x] Step 4: Implement `TaskService` and `src/services/__init__.py`
+- [x] Step 5: Run service tests — all seven pass
+- [x] Step 6: Commit `feat(tasks): add shared TaskService with user-scoped CRUD`
+
+### Task 3: Refactor REST endpoints onto TaskService
+
+- [x] Step 1: Confirm current REST tests pass after Task 1
+- [x] Step 2: Replace router logic with `TaskService` calls
+- [x] Step 3: Add regression test for soft delete
+- [x] Step 4: Run REST and service tests — all pass
+- [x] Step 5: Commit `refactor(tasks): route REST handlers through TaskService`
+
+### Task 4: Implement MCP identity resolution
+
+- [x] Step 1: Write failing identity tests (4 tests)
+- [x] Step 2: Run tests to verify they fail (ModuleNotFoundError)
+- [x] Step 3: Implement `src/mcp/identity.py` with `resolve_user_id()`
+- [x] Step 4: Run identity tests — four pass
+- [x] Step 5: Commit `feat(mcp): resolve user identity from env or verified token`
+
+### Task 5: Build the MCP server and read-only tools
+
+- [x] Step 1: Pin `mcp>=2.3,<3` in requirements.txt
+- [x] Step 2: Write failing read-only tool tests (3 tests)
+- [x] Step 3: Run tests to verify they fail (ModuleNotFoundError)
+- [x] Step 4: Implement `src/mcp/server.py` skeleton + `todo_list_tasks`, `todo_get_task`, `todo_summary`
+- [x] Step 5: Run read-only tool tests — three pass
+- [x] Step 6: Commit `feat(mcp): add MCPServer with read-only task tools`
+
+### Task 6: Add MCP mutation tools
+
+- [x] Step 1: Write failing mutation tests (3 tests)
+- [x] Step 2: Run tests to verify they fail (unknown tools)
+- [x] Step 3: Add `todo_create_task`, `todo_update_task`, `todo_complete_task`, `todo_reopen_task`, `todo_delete_task`
+- [x] Step 4: Run MCP tests — all six pass
+- [x] Step 5: Commit `feat(mcp): add task mutation tools with destructive annotation`
+
+> Note: error-path tests use `pytest.raises(ToolError)` because MCP SDK 2.x raises from `call_tool` instead of returning `is_error=True`.
+
+### Task 7: Add the stdio entrypoint and integration documentation
+
+- [x] Step 1: Add `main()` entrypoint and `src/mcp/__init__.py`
+- [x] Step 2: Verify module imports without errors
+- [x] Step 3: Verify process starts and waits for stdio (timeout exit 124)
+- [x] Step 4: Test with MCP Inspector — eight tools listed
+- [x] Step 5: Create `backend/docs/mcp.md` with client configuration
+- [x] Step 6: Commit `feat(mcp): add stdio entrypoint and client documentation`
+
+> Note: `__init__.py` uses a lazy `__getattr__` export so `python -m src.mcp.server` does not double-import the module (runpy warning).
+
+### Task 8: Remove the legacy MCP draft and update documentation
+
+- [ ] Step 1: Confirm nothing imports `todo_mcp_server`
+- [ ] Step 2: Delete `backend/src/mcp/todo_mcp_server.py`
+- [ ] Step 3: Replace chatbot tool bodies with `TaskService` adapters
+- [ ] Step 4: Update README claims (feature bullet + AI chat/MCP section)
+- [ ] Step 5: Run full backend test suite — only 3 known security failures remain
+- [ ] Step 6: Run ruff lint on changed files — no errors
+- [ ] Step 7: Commit `refactor(mcp): remove legacy draft and route chat tools through TaskService`
+
+---
+
+## Acceptance Criteria (MVP)
+
+- [ ] `python -m src.mcp.server` starts and waits for stdio input
+- [ ] MCP Inspector lists exactly eight tools
+- [ ] No tool schema contains `user_id`
+- [ ] `todo_create_task` creates a task for the `MCP_USER_ID` user
+- [ ] `todo_update_task` updates title without `AttributeError`
+- [ ] `todo_complete_task` and `todo_reopen_task` are idempotent
+- [ ] `todo_delete_task` permanently deletes and is annotated destructive
+- [ ] Cross-user access returns an MCP tool error
+- [ ] REST endpoints keep same URLs, bodies, and response models
+- [ ] REST delete remains a soft delete
+- [ ] Chatbot's five tool calls use `TaskService` and `update_task` works
+- [ ] No production code imports `todo_mcp_server.py`
+- [ ] `pytest tests/test_auth.py tests/test_tasks.py tests/services tests/mcp -q` passes
+- [ ] `ruff check` passes on all files created or modified
+
+---
+
+## Phase 2 Backlog (post-MVP)
+
+### 8.1 Streamable HTTP with per-user JWT
+
+- [ ] Add `backend/src/mcp/http.py`
+- [ ] Implement `JWTTokenVerifier` with `verify_token`
+- [ ] Build server with `token_verifier` and `AuthSettings`
+- [ ] Expose `streamable_http_app()` on separate ASGI process or mount at `/mcp`
+- [ ] Tests: valid token, expired token, cross-user isolation
+
+### 8.2 MCP resources and prompts
+
+- [ ] Resources: `todo://tasks/active`, `todo://tasks/completed`, `todo://tasks/{task_id}`
+- [ ] Prompts: `daily_review`, `prioritize_my_day`, `weekly_plan`
+- [ ] Reuse `TaskService`; read-only only
+
+### 8.3 RAG tools
+
+- [ ] `todo_search_documents(query, limit)` backed by `src/rag/store.py`
+- [ ] `todo_ask_documents(question)` backed by `src/rag/chatbot.py`
+- [ ] Enforce per-user document scoping
+
+### 8.4 Evaluation suite
+
+- [ ] Seed deterministic database with five tasks
+- [ ] Create ten read-only evaluation questions with verifiable answers
+- [ ] Run through MCP Inspector or scripted `ClientSession`
+- [ ] Store as `backend/tests/mcp/evaluations.xml`
+
+### 8.5 Chat as an MCP client
+
+- [ ] Measure latency of in-process vs MCP ClientSession
+- [ ] Replace `call_mcp_tool()` only if external MCP compatibility is required
