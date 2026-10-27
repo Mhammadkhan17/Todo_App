@@ -37,7 +37,7 @@ tokenizers>=0.20.0
 
 # MCP and Agent Dependencies
 openai>=1.10.0
-mcp>=1.0.0
+mcp>=2.3,<3
 
 # Development and Testing
 pytest>=8.3.4
