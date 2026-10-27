@@ -71,32 +71,34 @@
 
 ### Task 8: Remove the legacy MCP draft and update documentation
 
-- [ ] Step 1: Confirm nothing imports `todo_mcp_server`
-- [ ] Step 2: Delete `backend/src/mcp/todo_mcp_server.py`
-- [ ] Step 3: Replace chatbot tool bodies with `TaskService` adapters
-- [ ] Step 4: Update README claims (feature bullet + AI chat/MCP section)
-- [ ] Step 5: Run full backend test suite — only 3 known security failures remain
-- [ ] Step 6: Run ruff lint on changed files — no errors
-- [ ] Step 7: Commit `refactor(mcp): remove legacy draft and route chat tools through TaskService`
+- [x] Step 1: Confirm nothing imports `todo_mcp_server`
+- [x] Step 2: Delete `backend/src/mcp/todo_mcp_server.py`
+- [x] Step 3: Replace chatbot tool bodies with `TaskService` adapters
+- [x] Step 4: Update README claims (feature bullet + AI chat/MCP section)
+- [x] Step 5: Run full backend test suite — only 3 known security failures remain
+- [x] Step 6: Run ruff lint on changed files — no errors
+- [x] Step 7: Commit `refactor(mcp): remove legacy draft and route chat tools through TaskService`
 
 ---
 
 ## Acceptance Criteria (MVP)
 
-- [ ] `python -m src.mcp.server` starts and waits for stdio input
-- [ ] MCP Inspector lists exactly eight tools
-- [ ] No tool schema contains `user_id`
-- [ ] `todo_create_task` creates a task for the `MCP_USER_ID` user
-- [ ] `todo_update_task` updates title without `AttributeError`
-- [ ] `todo_complete_task` and `todo_reopen_task` are idempotent
-- [ ] `todo_delete_task` permanently deletes and is annotated destructive
-- [ ] Cross-user access returns an MCP tool error
-- [ ] REST endpoints keep same URLs, bodies, and response models
-- [ ] REST delete remains a soft delete
-- [ ] Chatbot's five tool calls use `TaskService` and `update_task` works
-- [ ] No production code imports `todo_mcp_server.py`
-- [ ] `pytest tests/test_auth.py tests/test_tasks.py tests/services tests/mcp -q` passes
-- [ ] `ruff check` passes on all files created or modified
+- [x] `python -m src.mcp.server` starts and waits for stdio input
+- [x] MCP Inspector lists exactly eight tools
+- [x] No tool schema contains `user_id`
+- [x] `todo_create_task` creates a task for the `MCP_USER_ID` user
+- [x] `todo_update_task` updates title without `AttributeError`
+- [x] `todo_complete_task` and `todo_reopen_task` are idempotent
+- [x] `todo_delete_task` permanently deletes and is annotated destructive
+- [x] Cross-user access returns an MCP tool error
+- [x] REST endpoints keep same URLs, bodies, and response models
+- [x] REST delete remains a soft delete
+- [x] Chatbot's five tool calls use `TaskService` and `update_task` works
+- [x] No production code imports `todo_mcp_server.py`
+- [x] `pytest tests/test_auth.py tests/test_tasks.py tests/services tests/mcp -q` passes
+- [x] `ruff check` passes on all files created or modified
+
+> Notes: acceptance coverage lives in `tests/mcp/test_server.py` (MCP_USER_ID binding, idempotent complete/reopen, cross-user errors, destructive/read-only annotations) and `tests/test_todo_agent_tools.py` (five chat tools on TaskService). Ruff required sorting/typing autofixes plus `# noqa: BLE001` on intentional broad catches; `src/auth/jwt_service.py` still has pre-existing lint errors but the plan never modifies it.
 
 ---
 
