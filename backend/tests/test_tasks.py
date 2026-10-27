@@ -182,3 +182,34 @@ def test_toggle_task_completion(client: TestClient, sample_user_data: dict, samp
     assert data["id"] == task_id
     assert data["status"] == "COMPLETED"
     assert "message" in data
+
+
+def test_delete_task_is_soft_delete(client, sample_user_data, sample_task_data):
+    client.post("/api/register", json=sample_user_data)
+    login = client.post(
+        "/api/token",
+        json={
+            "username": sample_user_data["username"],
+            "password": sample_user_data["password"],
+        },
+    ).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+    created = client.post(
+        f"/api/{login['user_id']}/tasks",
+        json=sample_task_data,
+        headers=headers,
+    ).json()
+
+    response = client.delete(
+        f"/api/{login['user_id']}/tasks/{created['id']}",
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    fetched = client.get(
+        f"/api/{login['user_id']}/tasks/{created['id']}",
+        headers=headers,
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "COMPLETED"
