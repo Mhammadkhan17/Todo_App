@@ -7,7 +7,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from sqlmodel import Session
 
 from src.mcp.server import create_server
-from src.models.task import Priority
+from src.models.task import Priority, Task
 from src.models.user import User
 from src.services.task_service import TaskService
 from tests.helpers import create_user
@@ -93,7 +93,7 @@ async def test_summary_counts(mcp_server, test_db):
 
 
 @pytest.mark.asyncio
-async def test_create_update_complete_reopen(mcp_server):
+async def test_create_update_complete_reopen(mcp_server, test_db):
     created = await mcp_server.call_tool(
         "todo_create_task",
         {"title": "Buy milk", "priority": "high"},
@@ -101,6 +101,12 @@ async def test_create_update_complete_reopen(mcp_server):
     task = _payload(created)
     assert created.is_error is False
     assert task["priority"] == "HIGH"
+
+    # created for the MCP_USER_ID identity, not a hardcoded user
+    with Session(test_db) as session:
+        stored = session.get(Task, task["id"])
+        assert stored is not None
+        assert stored.user_id == int(os.environ["MCP_USER_ID"])
 
     updated = await mcp_server.call_tool(
         "todo_update_task",
@@ -114,11 +120,26 @@ async def test_create_update_complete_reopen(mcp_server):
     )
     assert _payload(completed)["status"] == "COMPLETED"
 
+    # idempotent: completing again succeeds and keeps the same state
+    completed_again = await mcp_server.call_tool(
+        "todo_complete_task",
+        {"task_id": task["id"]},
+    )
+    assert completed_again.is_error is False
+    assert _payload(completed_again)["status"] == "COMPLETED"
+
     reopened = await mcp_server.call_tool(
         "todo_reopen_task",
         {"task_id": task["id"]},
     )
     assert _payload(reopened)["status"] == "ACTIVE"
+
+    reopened_again = await mcp_server.call_tool(
+        "todo_reopen_task",
+        {"task_id": task["id"]},
+    )
+    assert reopened_again.is_error is False
+    assert _payload(reopened_again)["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -145,3 +166,38 @@ async def test_delete_task_is_permanent(mcp_server):
 async def test_unknown_task_returns_actionable_error(mcp_server):
     with pytest.raises(ToolError, match="not found"):
         await mcp_server.call_tool("todo_get_task", {"task_id": 999999})
+
+
+@pytest.mark.asyncio
+async def test_cross_user_task_returns_error(mcp_server, test_db):
+    with Session(test_db) as session:
+        other = create_user(session)
+        other_task = TaskService.create(
+            session, user_id=other.id, title="Not yours"
+        )
+
+    with pytest.raises(ToolError, match="not found"):
+        await mcp_server.call_tool("todo_get_task", {"task_id": other_task.id})
+
+    with pytest.raises(ToolError, match="not found"):
+        await mcp_server.call_tool(
+            "todo_update_task",
+            {"task_id": other_task.id, "title": "Hijacked"},
+        )
+
+    with pytest.raises(ToolError, match="not found"):
+        await mcp_server.call_tool(
+            "todo_delete_task", {"task_id": other_task.id}
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_task_is_annotated_destructive(mcp_server):
+    tools = await mcp_server.list_tools()
+    delete = next(t for t in tools if t.name == "todo_delete_task")
+    assert delete.annotations is not None
+    assert delete.annotations.destructive_hint is True
+
+    read_only = next(t for t in tools if t.name == "todo_list_tasks")
+    assert read_only.annotations is not None
+    assert read_only.annotations.read_only_hint is True
