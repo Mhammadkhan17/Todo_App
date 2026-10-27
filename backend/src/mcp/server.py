@@ -208,3 +208,12 @@ def create_server(session_factory: SessionFactory | None = None) -> MCPServer:
         return run(action)
 
     return mcp
+
+
+def main() -> None:
+    mcp = create_server()
+    mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
