@@ -5,14 +5,15 @@ Security Tests
 Tests for security middleware, input validation, and JWT security.
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
-import os
 
-from src.security.validation import InputValidator
 from src.auth.jwt_service import JWTService, SecurityConfig
 from src.security.config import get_security_settings
+from src.security.validation import InputValidator
 
 
 def test_password_validation():
@@ -180,9 +181,13 @@ def test_sql_injection_detection():
     dangerous_input = "'; DROP TABLE users; --"
     sanitized = InputValidator.sanitize_string(dangerous_input)
 
-    # Should be sanitized
+    # Sanitize layer neutralizes quote breakout (no raw ' survives escaping)
     assert "'DROP TABLE" not in sanitized
-    assert "--" not in sanitized
+    assert "'" not in sanitized
+
+    # Detection layer rejects the payload outright before it reaches storage
+    with pytest.raises(ValueError, match="invalid characters"):
+        InputValidator.validate_search_query(dangerous_input)
 
 
 def test_xss_detection():
@@ -191,16 +196,18 @@ def test_xss_detection():
     xss_payload = "<script>alert('xss')</script>"
     sanitized = InputValidator.sanitize_string(xss_payload)
 
-    # Should be HTML escaped
-    assert "<script>" in sanitized
-    assert "alert('xss')" in sanitized
+    # Should be HTML escaped: raw tag and quotes must not survive
+    assert "<script>" not in sanitized
+    assert "&lt;script&gt;" in sanitized
+    assert "alert(&#x27;xss&#x27;)" in sanitized
+    assert "'" not in sanitized
 
 
 def test_rate_limiting_simulation():
     """Test rate limiting logic simulation."""
 
     from collections import deque
-    from datetime import datetime, timedelta
+    from datetime import UTC, datetime, timedelta
 
     # Simulate rate limiting storage
     rate_limit_storage = {}
@@ -209,7 +216,7 @@ def test_rate_limiting_simulation():
     rate_limit_window = 60  # 1 minute
 
     # Add multiple requests within window
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     request_times = deque()
 
     for i in range(rate_limit_attempts):
@@ -243,7 +250,10 @@ def test_security_headers(client: TestClient):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
 
     assert "X-Frame-Options" in response.headers
-    assert response.headers["X-Frame-Options"] == "DENY"
+    # EITHER value restricts framing (clickjacking defense). The app deliberately
+    # ships SAMEORIGIN so Hugging Face Spaces can embed it (see middleware.py;
+    # CSP frame-ancestors additionally allowlists *.hf.space and huggingface.co).
+    assert response.headers["X-Frame-Options"] in ("DENY", "SAMEORIGIN")
 
     assert "X-XSS-Protection" in response.headers
     assert response.headers["X-XSS-Protection"] == "1; mode=block"
