@@ -124,9 +124,19 @@
 
 ### 8.2 MCP resources and prompts
 
-- [ ] Resources: `todo://tasks/active`, `todo://tasks/completed`, `todo://tasks/{task_id}`
-- [ ] Prompts: `daily_review`, `prioritize_my_day`, `weekly_plan`
-- [ ] Reuse `TaskService`; read-only only
+- [x] Resources: `todo://tasks/active`, `todo://tasks/completed`, `todo://tasks/{task_id}`
+- [x] Prompts: `daily_review`, `prioritize_my_day`, `weekly_plan`
+- [x] Reuse `TaskService`; read-only only
+
+> Notes: implemented in `src/mcp/server.py` inside `create_server()` via
+> `@mcp.resource`/`@mcp.prompt`; a `read()` helper maps `TodoException`/`ToolError`
+> to `ResourceError` (anticipated-failure path, no traceback leak to client).
+> Template params are cast by the SDK's `validate_call`, so `task_id: int` works;
+> cross-user reads raise `ResourceError("Task with ID N not found")` surfaced to
+> the client as `MCPError`. Identity still comes only from `resolve_user_id()`.
+> Shared `mcp_server` fixture + `payload`/`mcp_user` helpers moved from
+> `test_server.py` to `tests/mcp/conftest.py`; 7 new tests in
+> `test_resources_prompts.py`. Full suite: 117 passed + 3 known security failures.
 
 ### 8.3 RAG tools
 

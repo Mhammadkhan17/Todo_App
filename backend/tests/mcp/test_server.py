@@ -1,43 +1,14 @@
-import json
 import os
-from contextlib import contextmanager
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 from sqlmodel import Session
 
-from src.mcp.server import create_server
 from src.models.task import Priority, Task
-from src.models.user import User
 from src.services.task_service import TaskService
 from tests.helpers import create_user
-
-
-@pytest.fixture
-def mcp_server(test_db, monkeypatch):
-    with Session(test_db) as setup:
-        user = create_user(setup)
-        user_id = user.id
-
-    monkeypatch.setenv("MCP_USER_ID", str(user_id))
-
-    @contextmanager
-    def session_factory():
-        session = Session(bind=test_db)
-        try:
-            yield session
-        finally:
-            session.close()
-
-    return create_server(session_factory)
-
-
-def _payload(result):
-    return json.loads(result.content[0].text)
-
-
-def _mcp_user(session: Session) -> User:
-    return session.get(User, int(os.environ["MCP_USER_ID"]))
+from tests.mcp.conftest import mcp_user as _mcp_user
+from tests.mcp.conftest import payload as _payload
 
 
 @pytest.mark.asyncio
@@ -81,7 +52,9 @@ async def test_summary_counts(mcp_server, test_db):
         user = _mcp_user(session)
         TaskService.create(session, user_id=user.id, title="One")
         done = TaskService.create(session, user_id=user.id, title="Two")
-        TaskService.set_completed(session, user_id=user.id, task_id=done.id, completed=True)
+        TaskService.set_completed(
+            session, user_id=user.id, task_id=done.id, completed=True
+        )
 
     result = await mcp_server.call_tool("todo_summary", {})
     payload = _payload(result)
@@ -172,9 +145,7 @@ async def test_unknown_task_returns_actionable_error(mcp_server):
 async def test_cross_user_task_returns_error(mcp_server, test_db):
     with Session(test_db) as session:
         other = create_user(session)
-        other_task = TaskService.create(
-            session, user_id=other.id, title="Not yours"
-        )
+        other_task = TaskService.create(session, user_id=other.id, title="Not yours")
 
     with pytest.raises(ToolError, match="not found"):
         await mcp_server.call_tool("todo_get_task", {"task_id": other_task.id})
@@ -186,9 +157,7 @@ async def test_cross_user_task_returns_error(mcp_server, test_db):
         )
 
     with pytest.raises(ToolError, match="not found"):
-        await mcp_server.call_tool(
-            "todo_delete_task", {"task_id": other_task.id}
-        )
+        await mcp_server.call_tool("todo_delete_task", {"task_id": other_task.id})
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -10,7 +10,7 @@ load_dotenv()
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
 from sqlmodel import Session
 
@@ -62,6 +62,16 @@ def create_server(
             raise ToolError(str(exc.detail)) from exc
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
+
+    def read(action):
+        """Run a read-only resource action, mapping domain errors to ResourceError."""
+        try:
+            with factory() as session:
+                return action(session)
+        except TodoException as exc:
+            raise ResourceError(str(exc.detail)) from exc
+        except (ToolError, ValueError) as exc:
+            raise ResourceError(str(exc)) from exc
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     async def todo_list_tasks(
@@ -213,6 +223,128 @@ def create_server(
                 task_id=task_id,
             )
             return {"task_id": task_id, "status": "deleted"}
+
+        return run(action)
+
+    # --- Resources (read-only) ------------------------------------------
+
+    @mcp.resource(
+        "todo://tasks/active",
+        name="Active tasks",
+        description="The signed-in user's tasks that are not completed yet.",
+        mime_type="application/json",
+    )
+    def resource_active_tasks() -> list[dict]:
+        def action(session: Session) -> list[dict]:
+            tasks, _ = TaskService.list(
+                session,
+                user_id=resolve_user_id(),
+                status=Status.ACTIVE,
+                size=200,
+            )
+            return [TaskService.to_dict(task) for task in tasks]
+
+        return read(action)
+
+    @mcp.resource(
+        "todo://tasks/completed",
+        name="Completed tasks",
+        description="The signed-in user's completed tasks.",
+        mime_type="application/json",
+    )
+    def resource_completed_tasks() -> list[dict]:
+        def action(session: Session) -> list[dict]:
+            tasks, _ = TaskService.list(
+                session,
+                user_id=resolve_user_id(),
+                status=Status.COMPLETED,
+                size=200,
+            )
+            return [TaskService.to_dict(task) for task in tasks]
+
+        return read(action)
+
+    @mcp.resource(
+        "todo://tasks/{task_id}",
+        name="Task",
+        description="A single task by id, scoped to the signed-in user.",
+        mime_type="application/json",
+    )
+    def resource_task(task_id: int) -> dict:
+        def action(session: Session) -> dict:
+            task = TaskService.get(session, user_id=resolve_user_id(), task_id=task_id)
+            return TaskService.to_dict(task)
+
+        return read(action)
+
+    # --- Prompts (read-only) --------------------------------------------
+
+    def active_tasks(session: Session) -> list:
+        tasks, _ = TaskService.list(
+            session,
+            user_id=resolve_user_id(),
+            status=Status.ACTIVE,
+            size=200,
+        )
+        return tasks
+
+    @mcp.prompt(
+        name="daily_review",
+        description="Review today's active tasks with overdue work flagged.",
+    )
+    def prompt_daily_review() -> str:
+        def action(session: Session) -> str:
+            tasks = active_tasks(session)
+            today = datetime.now(timezone.utc).date()
+            lines = [f"Daily review: {len(tasks)} active task(s)."]
+            overdue = 0
+            for task in tasks:
+                marker = ""
+                if task.due_date and task.due_date < today:
+                    overdue += 1
+                    marker = " [OVERDUE]"
+                due = f" (due {task.due_date})" if task.due_date else ""
+                lines.append(f"- [{task.priority.value}] {task.title}{marker}{due}")
+            if overdue:
+                lines.append(f"{overdue} task(s) overdue.")
+            return "\n".join(lines)
+
+        return run(action)
+
+    @mcp.prompt(
+        name="prioritize_my_day",
+        description="Rank the signed-in user's active tasks by priority.",
+    )
+    def prompt_prioritize_my_day() -> str:
+        def action(session: Session) -> str:
+            order = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+            ranked = sorted(
+                active_tasks(session), key=lambda t: order.get(t.priority, 3)
+            )
+            lines = ["Help me prioritize my day. Tackle these in order:"]
+            for position, task in enumerate(ranked, start=1):
+                lines.append(f"{position}. [{task.priority.value}] {task.title}")
+            if not ranked:
+                lines.append("No active tasks.")
+            return "\n".join(lines)
+
+        return run(action)
+
+    @mcp.prompt(
+        name="weekly_plan",
+        description="Plan the week around active tasks and their due dates.",
+    )
+    def prompt_weekly_plan() -> str:
+        def action(session: Session) -> str:
+            tasks = sorted(
+                active_tasks(session),
+                key=lambda t: (t.due_date is None, t.due_date),
+            )
+            lines = [f"Weekly plan: {len(tasks)} active task(s)."]
+            for task in tasks:
+                due = f" (due {task.due_date})" if task.due_date else ""
+                lines.append(f"- {task.title}{due}")
+            return "\n".join(lines)
 
         return run(action)
 

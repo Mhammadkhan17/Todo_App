@@ -46,6 +46,29 @@ MCP_USER_ID=1 .venv/bin/python -m src.mcp.server
 | `todo_delete_task` | no | yes | Permanently delete |
 | `todo_summary` | yes | no | Counts and overdue total |
 
+## Resources (Phase 2)
+
+Read-only JSON views of the signed-in user's tasks. All are scoped to the MCP
+identity (`MCP_USER_ID` or the bearer token subject); reading another user's
+task id fails with a resource error.
+
+| URI | Contents |
+|---|---|
+| `todo://tasks/active` | Up to 200 active (not completed) tasks |
+| `todo://tasks/completed` | Up to 200 completed tasks |
+| `todo://tasks/{task_id}` | One task by id (template; 404s cross-user) |
+
+## Prompts (Phase 2)
+
+Read-only chat prompts that summarize the signed-in user's active tasks
+(again via `TaskService`, never accepting a user id):
+
+| Prompt | Output |
+|---|---|
+| `daily_review` | Task count, one line per task, overdue flagged |
+| `prioritize_my_day` | Active tasks ranked HIGH → MEDIUM → LOW |
+| `weekly_plan` | Active tasks sorted by due date |
+
 ## Streamable HTTP (Phase 2)
 
 Runs as a separate ASGI process next to the REST API. Every request must

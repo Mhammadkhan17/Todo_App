@@ -4,6 +4,7 @@ Phase 2.1: Streamable HTTP transport with per-user JWT identity.
 The HTTP app requires a REST-issued bearer token. Identity comes from the
 verified token subject — never from MCP_USER_ID, headers, or tool arguments.
 """
+
 import json
 from contextlib import contextmanager
 from datetime import timedelta
@@ -85,9 +86,12 @@ async def test_http_endpoint_rejects_missing_expired_and_invalid_tokens(http_app
 
     # The lifespan must open and close inside this test's task: the
     # session manager's anyio cancel scope cannot span fixture tasks.
-    async with http_app.router.lifespan_context(http_app), httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=http_app), base_url=TEST_BASE
-    ) as raw:
+    async with (
+        http_app.router.lifespan_context(http_app),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=http_app), base_url=TEST_BASE
+        ) as raw,
+    ):
         missing = await raw.post("/mcp", json=payload)
         invalid = await raw.post(
             "/mcp", json=payload, headers={"Authorization": "Bearer garbage"}
