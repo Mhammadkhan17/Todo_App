@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -33,7 +35,12 @@ def _priority(value: str | None) -> Priority | None:
     return Priority(value.upper())
 
 
-def create_server(session_factory: SessionFactory | None = None) -> MCPServer:
+def create_server(
+    session_factory: SessionFactory | None = None,
+    *,
+    token_verifier: TokenVerifier | None = None,
+    auth: AuthSettings | None = None,
+) -> MCPServer:
     factory = session_factory or database_engine.get_session
     mcp = MCPServer(
         name="todoflow",
@@ -43,6 +50,8 @@ def create_server(session_factory: SessionFactory | None = None) -> MCPServer:
             "Manage the authenticated user's tasks. Every tool is already scoped "
             "to that user. Never ask for a user id."
         ),
+        token_verifier=token_verifier,
+        auth=auth,
     )
 
     def run(action):

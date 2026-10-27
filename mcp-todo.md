@@ -106,11 +106,21 @@
 
 ### 8.1 Streamable HTTP with per-user JWT
 
-- [ ] Add `backend/src/mcp/http.py`
-- [ ] Implement `JWTTokenVerifier` with `verify_token`
-- [ ] Build server with `token_verifier` and `AuthSettings`
-- [ ] Expose `streamable_http_app()` on separate ASGI process or mount at `/mcp`
-- [ ] Tests: valid token, expired token, cross-user isolation
+- [x] Add `backend/src/mcp/http.py`
+- [x] Implement `JWTTokenVerifier` with `verify_token`
+- [x] Build server with `token_verifier` and `AuthSettings`
+- [x] Expose `streamable_http_app()` on separate ASGI process or mount at `/mcp`
+- [x] Tests: valid token, expired token, cross-user isolation
+
+> Notes: runs as a separate process (`python -m src.mcp.http`, port 8001) rather than
+> mounted in the REST app, per the risk-register mitigation. `create_server()` gained
+> keyword-only `token_verifier`/`auth` kwargs (stdio passes neither). The entrypoint
+> clears `MCP_USER_ID` so HTTP identity can only come from the token subject.
+> `AuthSettings(validate_token_resource=False)` is pinned because our JWTs carry no
+> RFC 8707 resource claim (SDK 3.0 would otherwise start rejecting them).
+> Tests drive the ASGI app in-process via `httpx2.ASGITransport` and the SDK's
+> `streamable_http_client`; the app lifespan must run inside the test's task
+> (pytest-asyncio fixture teardown is a different task, which anyio rejects).
 
 ### 8.2 MCP resources and prompts
 

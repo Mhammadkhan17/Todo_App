@@ -1,6 +1,6 @@
 # TodoFlow MCP Server
 
-The MCP server exposes the authenticated user's tasks over stdio.
+The MCP server exposes the authenticated user's tasks over stdio and (Phase 2) Streamable HTTP.
 
 ## Requirements
 
@@ -46,9 +46,48 @@ MCP_USER_ID=1 .venv/bin/python -m src.mcp.server
 | `todo_delete_task` | no | yes | Permanently delete |
 | `todo_summary` | yes | no | Counts and overdue total |
 
+## Streamable HTTP (Phase 2)
+
+Runs as a separate ASGI process next to the REST API. Every request must
+present a JWT access token issued by the REST API (`POST /api/auth/login`);
+the caller's identity is the token's subject claim.
+
+```bash
+cd backend
+.venv/bin/python -m src.mcp.http
+# MCP endpoint: http://127.0.0.1:8001/mcp
+```
+
+Configuration (environment variables):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MCP_HTTP_ISSUER_URL` | `http://127.0.0.1:8000` | OAuth issuer (REST API base) |
+| `MCP_HTTP_RESOURCE_URL` | `http://127.0.0.1:8001/mcp` | This server's public URL |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Bind host |
+| `MCP_HTTP_PORT` | `8001` | Bind port |
+
+```bash
+# Obtain a token from the REST API, then call MCP tools over HTTP:
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "..."}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+curl -s -X POST http://127.0.0.1:8001/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+Requests without a valid, unexpired token get `401 Unauthorized`. The
+process clears `MCP_USER_ID` on startup so HTTP identity can only ever come
+from the bearer token.
+
 ## Security
 
 - Tools never accept a user id.
 - stdio identity comes from `MCP_USER_ID`.
-- Phase 2 HTTP identity comes from a verified bearer token subject.
+- HTTP identity comes from a verified bearer token subject; missing,
+  invalid, or expired tokens are rejected with `401`.
 - `todo_delete_task` is permanent and cannot be undone.
