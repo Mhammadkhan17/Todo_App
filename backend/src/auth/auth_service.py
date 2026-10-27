@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from src.schemas.user import TokenData
 from src.models.user import User
@@ -50,49 +51,52 @@ class AuthService:
         return JWTService.verify_access_token(token)
 
     @staticmethod
-    def authenticate_user(username: str, password: str) -> Optional[User]:
-        """Authenticate a user with username and password."""
+    def _authenticate(session: Session, username: str, password: str) -> Optional[User]:
+        user = session.query(User).filter(
+            (User.username == username) | (User.email == username)
+        ).first()
+
+        if not user:
+            return None
+
+        if not AuthService.verify_password(password, user.password_hash):
+            return None
+
+        user.last_login_at = datetime.now(timezone.utc)
+        session.commit()
+        session.refresh(user)
+
+        return User(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+            password_hash=user.password_hash,
+            full_name=user.full_name,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_login_at=user.last_login_at,
+            email_verified=user.email_verified,
+            verification_token=user.verification_token,
+            password_reset_token=user.password_reset_token,
+            password_reset_expires=user.password_reset_expires,
+        )
+
+    @staticmethod
+    def authenticate_user(
+        username: str,
+        password: str,
+        session: Optional[Session] = None,
+    ) -> Optional[User]:
         try:
-            # Use session factory for authentication
-            with database_engine.get_session() as session:
-                # Try to find user by username or email
-                user = session.query(User).filter(
-                    (User.username == username) | (User.email == username)
-                ).first()
-
-                if not user:
-                    return None
-
-                if not AuthService.verify_password(password, user.password_hash):
-                    return None
-
-                # Update last login
-                user.last_login_at = datetime.now(timezone.utc)
-                session.commit()
-
-                # Refresh user and return a detached copy to avoid session binding issues
-                session.refresh(user)
-                user_copy = User(
-                    id=user.id,
-                    email=user.email,
-                    username=user.username,
-                    password_hash=user.password_hash,
-                    full_name=user.full_name,
-                    is_active=user.is_active,
-                    created_at=user.created_at,
-                    updated_at=user.updated_at,
-                    last_login_at=user.last_login_at,
-                    email_verified=user.email_verified,
-                    verification_token=user.verification_token,
-                    password_reset_token=user.password_reset_token,
-                    password_reset_expires=user.password_reset_expires
-                )
-                return user_copy
-
+            if session is not None:
+                return AuthService._authenticate(session, username, password)
+            with database_engine.get_session() as own_session:
+                return AuthService._authenticate(own_session, username, password)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Authentication failed: {str(e)}"
+                detail=f"Authentication failed: {str(e)}",
             )
 
     @staticmethod

@@ -64,10 +64,15 @@ async def register_user(user_data: UserCreate, session: Session = Depends(get_se
 
 @router.post("/login", response_model=Token)
 async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends()
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
 ):
     """Login and get access token."""
-    user = AuthService.authenticate_user(form_data.username, form_data.password)
+    user = AuthService.authenticate_user(
+        form_data.username,
+        form_data.password,
+        session=session,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -98,9 +103,16 @@ async def login_for_access_token(
 
 
 @router.post("/token", response_model=Token)
-async def get_token_for_user(user_data: UserLogin):
+async def get_token_for_user(
+    user_data: UserLogin,
+    session: Session = Depends(get_session),
+):
     """Get access token using username/password (alternative to form login)."""
-    user = AuthService.authenticate_user(user_data.username, user_data.password)
+    user = AuthService.authenticate_user(
+        user_data.username,
+        user_data.password,
+        session=session,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

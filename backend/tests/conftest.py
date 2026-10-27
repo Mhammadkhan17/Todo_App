@@ -74,6 +74,14 @@ def client(test_db):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _clean_tasks(test_db):
+    """Each test starts with no task rows (the shared user rows persist)."""
+    with test_db.begin() as conn:
+        conn.execute(Task.__table__.delete())
+    yield
+
+
 @pytest.fixture
 def sample_user_data():
     """Sample user data for testing."""

@@ -52,7 +52,15 @@ def test_login_user(client: TestClient, sample_user_data: dict):
     data = response.json()
     assert "access_token" in data
     assert data["token_type"] == "bearer"
-    assert data["user_id"] == 1  # First user should have ID 1
+
+    # The test database is shared across the session, so the numeric id is
+    # order-dependent. Verify the token resolves to the registered user.
+    me = client.get(
+        "/api/me", headers={"Authorization": f"Bearer {data['access_token']}"}
+    )
+    assert me.status_code == 200
+    assert me.json()["id"] == data["user_id"]
+    assert me.json()["username"] == sample_user_data["username"]
 
 
 def test_login_invalid_credentials(client: TestClient, sample_user_data: dict):
