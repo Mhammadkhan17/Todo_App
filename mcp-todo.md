@@ -173,5 +173,18 @@
 
 ### 8.5 Chat as an MCP client
 
-- [ ] Measure latency of in-process vs MCP ClientSession
-- [ ] Replace `call_mcp_tool()` only if external MCP compatibility is required
+- [x] Measure latency of in-process vs MCP ClientSession
+- [x] Replace `call_mcp_tool()` only if external MCP compatibility is required
+
+> Notes: `scripts/mcp_latency_benchmark.py` measures three paths (100 iters,
+> 50 tasks): A direct `call_mcp_tool` median **2.92 ms**, B in-process
+> `Client(create_server(...))` (a real `ClientSession`) median **3.62 ms** —
+> protocol overhead **+0.69 ms/call (1.2×)** — C stdio subprocess median
+> **1352.80 ms**. C needs Postgres (subprocess `database_engine` rejects
+> SQLite) so it ran against the remote dev DB, where a raw
+> `TaskService.list` alone costs ~1361 ms and a pooled `SELECT 1` ~910 ms:
+> C's latency is remote-DB round-trips, not MCP transport (rerun with a local
+> `DATABASE_URL` to isolate it). Decision: **keep `call_mcp_tool()`
+> in-process** — no external MCP consumer exists today; revisit only if
+> external MCP compatibility becomes a requirement. Numbers and rationale in
+> `backend/docs/mcp.md`.

@@ -131,6 +131,37 @@ cd backend
 Each case is one tool call and one exact expected value at a dot path (e.g.
 `tasks.0.title`), so a regression fails precisely the question it breaks.
 
+## Chat dispatch latency (Phase 2)
+
+`scripts/mcp_latency_benchmark.py` compares three ways to run the same work
+(list the user's tasks) — 100 iterations, 50 tasks, same machine:
+
+| Path | What it is | Median |
+|---|---|---|
+| A direct | `call_mcp_tool()` as `chat_router` dispatches today | 2.92 ms |
+| B in-process | `Client(create_server(...))` — real `ClientSession`, no process hop | 3.62 ms |
+| C stdio | spawned `python -m src.mcp.server` + `ClientSession` over pipes | 1352.80 ms |
+
+B − A is the MCP protocol overhead: **+0.69 ms/call (1.2×)** — validation,
+JSON-RPC framing and session dispatch, against the same in-memory database.
+
+C needs PostgreSQL (the subprocess' `database_engine` refuses SQLite), so it
+runs against the remote dev database; on this machine a raw
+`TaskService.list` against that same database costs ~1361 ms and a pooled
+`SELECT 1` ~910 ms — i.e. **C's latency is the remote-DB round-trip, not MCP
+transport**. Point `DATABASE_URL` at a local PostgreSQL to isolate C's
+transport cost.
+
+```bash
+cd backend
+.venv/bin/python scripts/mcp_latency_benchmark.py
+```
+
+**Decision:** keep chat dispatch in-process via `call_mcp_tool()` — it is the
+fastest path, and nothing outside this repo drives the chat tools over MCP
+today. Replace it with an MCP `ClientSession` only if external MCP
+compatibility becomes a requirement.
+
 ## Security
 
 - Tools never accept a user id.
