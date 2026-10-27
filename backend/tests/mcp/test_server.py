@@ -3,6 +3,7 @@ import os
 from contextlib import contextmanager
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from sqlmodel import Session
 
 from src.mcp.server import create_server
@@ -89,3 +90,58 @@ async def test_summary_counts(mcp_server, test_db):
     assert payload["total"] == 2
     assert payload["active"] == 1
     assert payload["completed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_create_update_complete_reopen(mcp_server):
+    created = await mcp_server.call_tool(
+        "todo_create_task",
+        {"title": "Buy milk", "priority": "high"},
+    )
+    task = _payload(created)
+    assert created.is_error is False
+    assert task["priority"] == "HIGH"
+
+    updated = await mcp_server.call_tool(
+        "todo_update_task",
+        {"task_id": task["id"], "title": "Buy oat milk"},
+    )
+    assert _payload(updated)["title"] == "Buy oat milk"
+
+    completed = await mcp_server.call_tool(
+        "todo_complete_task",
+        {"task_id": task["id"]},
+    )
+    assert _payload(completed)["status"] == "COMPLETED"
+
+    reopened = await mcp_server.call_tool(
+        "todo_reopen_task",
+        {"task_id": task["id"]},
+    )
+    assert _payload(reopened)["status"] == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_delete_task_is_permanent(mcp_server):
+    created = await mcp_server.call_tool(
+        "todo_create_task",
+        {"title": "Temporary"},
+    )
+    task_id = _payload(created)["id"]
+
+    deleted = await mcp_server.call_tool(
+        "todo_delete_task",
+        {"task_id": task_id},
+    )
+    assert deleted.is_error is False
+
+    # call_tool raises ToolError on failure in SDK 2.x instead of
+    # returning a CallToolResult with is_error=True.
+    with pytest.raises(ToolError, match="not found"):
+        await mcp_server.call_tool("todo_get_task", {"task_id": task_id})
+
+
+@pytest.mark.asyncio
+async def test_unknown_task_returns_actionable_error(mcp_server):
+    with pytest.raises(ToolError, match="not found"):
+        await mcp_server.call_tool("todo_get_task", {"task_id": 999999})
