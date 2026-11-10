@@ -351,4 +351,4 @@ For larger changes, open an issue first to discuss the approach. Bug reports and
 
 ## License
 
-Released under the [MIT License](LICENSE) — free to use, modify, and distribute with attribution. See [`LICENSE`](LICENSE) for the full text.
+Released under the [MIT License](LICENSE).
