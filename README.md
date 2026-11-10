@@ -1,5 +1,11 @@
 # Todo_App
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+
 **TodoFlow** — a full-stack task-management application with JWT authentication, statistics dashboards, an AI chat assistant, and RAG chat over your own uploaded documents, built with FastAPI and Next.js for developers who want a production-shaped reference project to review, run, and contribute to.
 
 ## Table of Contents
