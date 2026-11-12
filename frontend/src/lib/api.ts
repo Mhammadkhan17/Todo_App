@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, isAxiosError } from 'axios';
 import { ApiResponse, AuthResponse, User, Task, TaskStatistics, TaskQuery, CreateTaskData, UpdateTaskData } from '../types';
 import { getBackendUrl } from './utils';
+import { redirectToLogin } from './session';
 
 // Base API configuration - point to backend API
 const API_BASE_URL = `${getBackendUrl()}/api`;
@@ -36,19 +37,9 @@ class ApiClient {
       (response) => response,
       async (error) => {
         if (error.response?.status === 401) {
-          // Handle unauthorized access - clear auth data and redirect
-          try {
-            // Clear auth data from localStorage
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('user');
-
-            // Redirect to login page
-            if (typeof window !== 'undefined') {
-              window.location.href = '/auth/login';
-            }
-          } catch (signOutError) {
-            console.error('Sign out error:', signOutError);
-          }
+          // Session over: clears localStorage + cookie and hard-navigates
+          // to /auth/login (shared with the raw-fetch chat paths).
+          redirectToLogin();
         }
         return Promise.reject(error);
       }
@@ -154,18 +145,7 @@ class ApiClient {
   }
 
   async logout(): Promise<void> {
-    try {
-      // Clear auth data from localStorage
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-
-      // Redirect to login page
-      if (typeof window !== 'undefined') {
-        window.location.href = '/auth/login';
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+    redirectToLogin();
   }
 
   async refreshToken(): Promise<AuthResponse> {

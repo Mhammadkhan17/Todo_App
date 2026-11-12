@@ -7,18 +7,40 @@ from functools import lru_cache
 
 from qdrant_client import QdrantClient
 
+from .embeddings import ONNX_EMBEDDING_DIM, OPENROUTER_EMBEDDING_DIM
+
 DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_COLLECTION = "todo_documents"
-EMBEDDING_DIM = 384
+DEFAULT_EMBEDDING_PROVIDER = "onnx"
+PROVIDER_DIMS = {"onnx": ONNX_EMBEDDING_DIM, "openrouter": OPENROUTER_EMBEDDING_DIM}
 PAYLOAD_INDEX_FIELDS = ("metadata.user_id", "metadata.document_id")
 
 
 def qdrant_url() -> str:
-    return os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL)
+    return os.getenv("QDRANT_URL") or DEFAULT_QDRANT_URL
 
 
 def collection_name() -> str:
-    return os.getenv("RAG_COLLECTION", DEFAULT_COLLECTION)
+    return os.getenv("RAG_COLLECTION") or DEFAULT_COLLECTION
+
+
+def embedding_provider() -> str:
+    raw = os.getenv("EMBEDDING_PROVIDER") or DEFAULT_EMBEDDING_PROVIDER
+    return raw.strip().lower() or DEFAULT_EMBEDDING_PROVIDER
+
+
+def _unknown_provider(provider: str) -> ValueError:
+    return ValueError(
+        f"Unknown EMBEDDING_PROVIDER '{provider}' "
+        f"(expected one of: {', '.join(sorted(PROVIDER_DIMS))})"
+    )
+
+
+def embedding_dim() -> int:
+    provider = embedding_provider()
+    if provider not in PROVIDER_DIMS:
+        raise _unknown_provider(provider)
+    return PROVIDER_DIMS[provider]
 
 
 @lru_cache(maxsize=1)
@@ -31,9 +53,16 @@ def get_client() -> QdrantClient:
 
 @lru_cache(maxsize=1)
 def get_embedder():
-    from .embeddings import OnnxMiniLMEmbeddings
+    provider = embedding_provider()
+    if provider == "onnx":
+        from .embeddings import OnnxMiniLMEmbeddings
 
-    return OnnxMiniLMEmbeddings()
+        return OnnxMiniLMEmbeddings()
+    if provider == "openrouter":
+        from .embeddings import OpenRouterEmbeddings
+
+        return OpenRouterEmbeddings()
+    raise _unknown_provider(provider)
 
 
 def ensure_collection(client: QdrantClient | None = None) -> None:
@@ -46,7 +75,7 @@ def ensure_collection(client: QdrantClient | None = None) -> None:
     client.create_collection(
         name,
         vectors_config=models.VectorParams(
-            size=EMBEDDING_DIM, distance=models.Distance.COSINE
+            size=embedding_dim(), distance=models.Distance.COSINE
         ),
     )
     for field in PAYLOAD_INDEX_FIELDS:

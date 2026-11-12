@@ -14,10 +14,10 @@ export default function Home() {
     if (!isPending) {
       if (sessionData && sessionData.user) {
         // User is authenticated, redirect to dashboard
-        router.push('/dashboard');
+        router.replace('/dashboard');
       } else {
         // User is not authenticated, redirect to login
-        router.push('/auth/login');
+        router.replace('/auth/login');
       }
     }
   }, [sessionData, isPending, router]);

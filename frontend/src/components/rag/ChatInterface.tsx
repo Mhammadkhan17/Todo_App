@@ -3,7 +3,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Send, Bot, FileText, Loader2, Square, Copy, Check, RotateCcw, X, Paperclip, Globe, MessageSquare } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, getBackendUrl } from '@/lib/utils';
+import { redirectToLogin } from '@/lib/session';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
@@ -95,11 +96,16 @@ const ChatInterface = ({
       setIsLoadingHistory(true);
       try {
         const response = await fetch(
-          `/api/rag/sessions/${sessionId}/messages`,
+          `${getBackendUrl()}/api/rag/sessions/${sessionId}/messages`,
           {
             headers: { Authorization: `Bearer ${token || ''}` },
           }
         );
+        if (response.status === 401) {
+          // Session expired: sign out instead of "Could not load" toast.
+          redirectToLogin();
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (cancelled) return;
@@ -157,7 +163,7 @@ const ChatInterface = ({
       abortRef.current = controller;
 
       try {
-        const response = await fetch('/api/rag/chat', {
+        const response = await fetch(`${getBackendUrl()}/api/rag/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -176,6 +182,12 @@ const ChatInterface = ({
           signal: controller.signal,
         });
 
+        if (response.status === 401) {
+          // Session expired: sign out — never show the Retry banner, which
+          // would loop the same 401 forever (token is never cleared).
+          redirectToLogin();
+          return;
+        }
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }

@@ -12,7 +12,8 @@ import LuxuryDashboardLayout from '@/components/layout/LuxuryDashboardLayout';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { cn } from '@/lib/utils';
+import { cn, getBackendUrl } from '@/lib/utils';
+import { redirectToLogin } from '@/lib/session';
 import { Terminal, X, FileText, History, Menu, Moon, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -84,9 +85,13 @@ export default function ChatPage() {
     async (restoreId: string | null) => {
       setSessionsLoading(true);
       try {
-        const response = await fetch('/api/rag/sessions', {
+        const response = await fetch(`${getBackendUrl()}/api/rag/sessions`, {
           headers: { Authorization: `Bearer ${token || ''}` },
         });
+        if (response.status === 401) {
+          redirectToLogin();
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         const list: RagSession[] = data.sessions || [];
@@ -110,9 +115,13 @@ export default function ChatPage() {
     setDocsLoading(true);
     setDocsError(false);
     try {
-      const response = await fetch('/api/rag/documents', {
+      const response = await fetch(`${getBackendUrl()}/api/rag/documents`, {
         headers: { Authorization: `Bearer ${token || ''}` },
       });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setDocuments(data.documents || []);
@@ -193,7 +202,7 @@ export default function ChatPage() {
       }
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/rag/upload-and-index');
+      xhr.open('POST', `${getBackendUrl()}/api/rag/upload-and-index`);
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
       xhr.upload.onprogress = e => {
@@ -222,6 +231,11 @@ export default function ChatPage() {
         if (elapsedRef.current) {
           clearInterval(elapsedRef.current);
           elapsedRef.current = null;
+        }
+        if (xhr.status === 401) {
+          // Session expired mid-upload: sign out instead of error toast.
+          redirectToLogin();
+          return;
         }
         let payload: {
           success?: boolean;
@@ -294,6 +308,10 @@ export default function ChatPage() {
             headers: { Authorization: `Bearer ${token || ''}` },
           }
         );
+        if (response.status === 401) {
+          redirectToLogin();
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         setDocuments(prev => prev.filter(d => d.id !== doc.id));
         toast.success(`Removed ${doc.original_filename}`);
@@ -323,6 +341,10 @@ export default function ChatPage() {
             body: JSON.stringify({ is_active: next }),
           }
         );
+        if (response.status === 401) {
+          redirectToLogin();
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         setDocuments(prev =>
           prev.map(d => (d.id === doc.id ? { ...d, is_active: next } : d))

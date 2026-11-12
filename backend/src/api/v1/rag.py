@@ -24,6 +24,11 @@ from ...dependencies.auth import get_current_user
 from ...models.rag import ChatMessage, ChatSession, Document
 from ...models.user import User
 from ...rag.chatbot import RAGChatbot
+from ...rag.guards import (
+    INJECTION_BLOCK_MESSAGE,
+    detect_injection,
+    sanitize_output,
+)
 from ...rag.ingest import DocumentIngestor
 
 router = APIRouter(prefix="/rag")
@@ -130,6 +135,16 @@ def detect_intent(message: str) -> str:
     """
     message_lower = message.lower().strip()
 
+    # Questions that explicitly reference the user's data/document context win
+    # over task keywords (e.g. "what are my tasks from test dataset todo?"
+    # should be answered from the indexed dataset, not treated as a task command).
+    document_context_markers = [
+        'dataset', 'document', 'uploaded', 'indexed', 'pdf',
+        'from the file', 'in the file', 'from my file', 'from my documents',
+    ]
+    if any(marker in message_lower for marker in document_context_markers):
+        return 'document_query'
+
     # Keywords for task management
     task_keywords = [
         'add task', 'create task', 'new task', 'add a task', 'create a task',
@@ -143,7 +158,7 @@ def detect_intent(message: str) -> str:
 
     # Keywords for document queries
     document_keywords = [
-        'document', 'file', 'search', 'find', 'information', 'tell me',
+        'document', 'file', 'dataset', 'search', 'find', 'information', 'tell me',
         'what does', 'where is', 'when was', 'who is', 'how to',
         'according to', 'based on', 'refer to', 'mentioned in',
         'summarize', 'explain', 'describe', 'question about'
@@ -196,6 +211,16 @@ def chat_with_rag(
             if owner is None:
                 raise HTTPException(status_code=404, detail="Session not found")
 
+        # Deterministic input guard: refuse known injection payloads (OWASP
+        # LLM01) without ever calling the LLM.
+        if detect_injection(request.message):
+            return ChatResponse(
+                response=INJECTION_BLOCK_MESSAGE,
+                sources=[],
+                query=request.message,
+                session_id=session_id,
+            )
+
         # Detect intent to determine how to process the request
         intent = detect_intent(request.message)
 
@@ -206,12 +231,12 @@ def chat_with_rag(
                 command=request.message
             )
 
-            # Format response based on the result
-            if "error" in response_data:
-                response_text = f"Error: {response_data['error']}"
-            elif isinstance(response_data, dict) and "response" in response_data:
-                # If it's a dict with response key (from simplified agent)
+            # Format response based on the result. The shared agent returns a
+            # friendly "response" even alongside "error", so prefer it.
+            if isinstance(response_data, dict) and "response" in response_data:
                 response_text = response_data["response"]
+            elif isinstance(response_data, dict) and "error" in response_data:
+                response_text = f"Error: {response_data['error']}"
             elif isinstance(response_data, list) and len(response_data) > 0:
                 # If it's a list of tasks
                 if len(response_data) == 0:
@@ -242,6 +267,10 @@ def chat_with_rag(
                 str(current_user.id),
                 document_ids=allowed_ids,
             )
+
+        # Deterministic output guard: replace responses that leak prompt
+        # internals (OWASP LLM07) before they are stored or returned.
+        response["response"] = sanitize_output(response["response"])
 
         # Store the conversation in the database
         # Create chat message entry

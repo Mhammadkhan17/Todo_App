@@ -36,8 +36,9 @@ onnxruntime>=1.19.0
 tokenizers>=0.20.0
 
 # MCP and Agent Dependencies
+# HF Space builds (Gradio SDK) can install gradio[mcp] extras that pin mcp; keep >=1.10 for Gradio compat.
 openai>=1.10.0
-mcp>=2.3,<3
+mcp>=1.10.1,<3
 
 # Development and Testing
 pytest>=8.3.4
@@ -46,3 +47,8 @@ httpx>=0.28.1
 black>=24.10.0
 ruff>=0.8.2
 mypy>=1.14.0
+# Hugging Face Spaces (Gradio wrapper over FastAPI)
+# Pin to avoid HF builder resolving conflicting gradio[mcp] pins with older mcp constraints.
+gradio==5.49.1
+# ZeroGPU decorator used by main.py (preinstalled on the Space; needed for docker/local)
+spaces>=0.51.3

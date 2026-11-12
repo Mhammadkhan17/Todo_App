@@ -1,15 +1,24 @@
-"""Local ONNX MiniLM-L6-v2 embeddings (Approach A: port of rag-example)."""
+"""Embedding providers: local ONNX MiniLM-L6-v2 and hosted OpenRouter Nemotron.
+
+`EMBEDDING_PROVIDER` selects which one `store.get_embedder()` returns:
+`onnx` (local, 384-dim) or `openrouter` (hosted, 2048-dim).
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "all-MiniLM-L6-v2"
-EMBEDDING_DIM = 384
+ONNX_EMBEDDING_DIM = 384
 MAX_TOKENS = 256
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-embed-1b:free"
+OPENROUTER_EMBEDDING_DIM = 2048
 
 
 def mean_pool(token_embeddings, attention_mask):
@@ -76,3 +85,43 @@ class OnnxMiniLMEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         return self._encode([text])[0].tolist()
+
+
+class OpenRouterEmbeddings(Embeddings):
+    """Hosted embeddings via OpenRouter's OpenAI-compatible `/api/v1/embeddings`."""
+
+    def __init__(self, model: str | None = None, api_key: str | None = None):
+        try:
+            from langchain_openai import OpenAIEmbeddings
+        except ImportError as exc:
+            raise ImportError(
+                "OpenRouter embedding deps missing — install backend/requirements.txt "
+                "(langchain-openai)"
+            ) from exc
+
+        api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY not set — required when EMBEDDING_PROVIDER=openrouter"
+            )
+        self.model = model or os.getenv(
+            "OPENROUTER_EMBED_MODEL", DEFAULT_OPENROUTER_MODEL
+        )
+        # check_embedding_ctx_length=True (default) tokenizes with tiktoken and
+        # sends token-ID arrays; NVIDIA rejects those ("support strings and
+        # multimodal inputs") — send raw strings instead. See langchain_openai
+        # OpenAIEmbeddings note for OpenAI-compatible APIs.
+        self._inner = OpenAIEmbeddings(
+            model=self.model,
+            api_key=api_key,
+            base_url=OPENROUTER_BASE_URL,
+            check_embedding_ctx_length=False,
+        )
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return self._inner.embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._inner.embed_query(text)

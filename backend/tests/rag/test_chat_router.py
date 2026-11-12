@@ -29,3 +29,13 @@ def test_unknown_provider_is_caught_as_error(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER", "bogus")
     result = asyncio.run(process_with_openai_and_mcp("1", "hello"))
     assert "Unknown AI_PROVIDER" in result["response"]
+
+
+def test_task_command_sync_missing_key_returns_graceful_mock(monkeypatch):
+    """The shared implementation also runs sync from the RAG chat task branch."""
+    from src.agents.todo_agent import process_natural_language_command
+
+    monkeypatch.setenv("AI_PROVIDER", "openrouter")
+    result = process_natural_language_command("1", "hello")
+    assert "OPENROUTER API key is not configured" in result["response"]
+    assert result["tool_calls"] == []

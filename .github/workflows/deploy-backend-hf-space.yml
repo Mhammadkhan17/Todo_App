@@ -1,0 +1,63 @@
+name: Deploy Backend to Hugging Face Space
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend-hf-space.yml"
+  workflow_dispatch:
+    inputs:
+      space_repo:
+        description: "HF Space repo (e.g. username/space-name). Overrides HF_SPACE_REPO secret."
+        required: false
+        type: string
+      space_branch:
+        description: "Branch on the Space repo"
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+
+      - name: Push backend/ to Hugging Face Space (Gradio SDK)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_REPO: ${{ github.event.inputs.space_repo || vars.HF_SPACE_REPO || secrets.HF_SPACE_REPO }}
+          HF_SPACE_BRANCH: ${{ github.event.inputs.space_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "::error::Missing HF_TOKEN secret (Settings → Secrets and variables → Actions). Use a Hugging Face access token with write access."
+            exit 1
+          fi
+          if [ -z "${HF_SPACE_REPO:-}" ]; then
+            echo "::error::Missing HF_SPACE_REPO (secret or workflow_dispatch input), e.g. your-username/todo-backend"
+            exit 1
+          fi
+
+          SPACE_URL="https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}"
+          git remote remove hf-space 2>/dev/null || true
+          git remote add hf-space "$SPACE_URL"
+
+          # Push only backend/ contents as the Space repo root (contains HF README sdk: gradio)
+          SPLIT_SHA="$(git subtree split --prefix backend HEAD)"
+          git push hf-space "${SPLIT_SHA}:refs/heads/${HF_SPACE_BRANCH}" --force
+
+          echo "Deployed backend/ to https://huggingface.co/spaces/${HF_SPACE_REPO} (branch: ${HF_SPACE_BRANCH})"

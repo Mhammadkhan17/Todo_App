@@ -212,12 +212,11 @@ export function getBaseUrl(): string {
   return 'http://localhost:3000';
 }
 
-/**
- * Gets the backend API URL
- * @returns The backend API URL string
- */
 export function getBackendUrl(): string {
-  return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const base =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    'http://localhost:8000';
+  return base.replace(/\/+$/, '');
 }
 
 // Utility function for merging class names

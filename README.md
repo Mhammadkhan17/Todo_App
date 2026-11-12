@@ -281,9 +281,8 @@ pytest tests/ -v --tb=short     # 85 tests: auth, tasks, security, health, RAG (
 > Tests boot the FastAPI app, which checks for a reachable PostgreSQL. Start Postgres first (`docker-compose up -d postgres`) or point `DATABASE_URL` at a test database.
 
 ```bash
-./scripts/lint.sh                # black --check, ruff, mypy (via docker-compose)
-# or directly:
-cd backend && black --check src/ && ruff check src/ && mypy src/ --ignore-missing-imports
+cd backend
+black --check src/ && ruff check src/ && mypy src/ --ignore-missing-imports
 ```
 
 ### Frontend
@@ -301,8 +300,6 @@ Every row below is a known, documented issue — check here before opening one.
 | --- | --- | --- |
 | Backend refuses to start, or `pytest` errors immediately | No reachable PostgreSQL (the app checks at startup) | `docker-compose up -d postgres`, or point `DATABASE_URL` at any reachable database (e.g. Neon) |
 | `docker-compose build backend` fails | Compose targets `development`, but `backend/Dockerfile` only defines `builder` and `production` stages | Run the two apps locally per the [Quickstart](#quickstart) — that is the supported path |
-| `scripts/dev-start.sh` errors mentioning `adminer` | The script references an undefined `adminer` service | Start services individually (e.g. `docker-compose up -d postgres`) instead |
-| `scripts/test.sh` fails on missing directories | It runs `tests/integration/` and `tests/security/`, which do not exist yet | Run `pytest tests/ -v` directly |
 | Chat replies "not configured" | No AI provider credentials set | Set `AI_PROVIDER` plus `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` (see [Configuration](#configuration)) |
 | Embedding tests skip / upload indexing fails with a missing model | ONNX weights not fetched (or `onnxruntime`/`tokenizers` not installed) | `backend/.venv/bin/python scripts/fetch_embeddings_model.py` and `pip install -r backend/requirements.txt` |
 | Upload succeeds but chat answers ignore the file | No AI provider key, so chat returns the "not configured" reply | Set an `AI_PROVIDER` + key (Quickstart step 6) |
@@ -337,7 +334,7 @@ Todo_App/
 │       ├── contexts/         # AuthContext, ThemeContext
 │       ├── hooks/            # useAuth, useTasks
 │       └── lib/              # axios client, API helpers
-├── scripts/                  # setup, dev start/stop, test, lint, fetch_embeddings_model helpers
+├── scripts/                  # fetch_embeddings_model.py helper
 ├── docker-compose.yml        # dev: postgres, backend, frontend, qdrant (v1.19.2), redis
 └── docker-compose.prod.yml   # production build targets
 ```

@@ -2,7 +2,9 @@
  * Authentication utilities for the FastAPI-compatible authentication system
  */
 
+import { useEffect, useState } from 'react';
 import { getBackendUrl } from './utils';
+import { clearAuthStorage, isTokenExpired, setAuthCookie } from './session';
 
 // Mock auth client implementation for compatibility
 // This is kept to maintain compatibility with existing code that imports from this file
@@ -52,8 +54,13 @@ const mockAuthClient = {
 
         const data = await response.json();
 
-        // Store token
+        // Store token + middleware cookie (mobile path logs in via a full
+        // page navigation, so the proxy needs the cookie too)
         localStorage.setItem('auth_token', data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem('refresh_token', data.refresh_token);
+        }
+        setAuthCookie(data.access_token);
 
         // Get user info
         const userResponse = await fetch(`${getBackendUrl()}/api/me`, {
@@ -111,9 +118,8 @@ const mockAuthClient = {
   },
   signOut: async () => {
     try {
-      // Clear auth data
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
+      // Clear auth data (localStorage + middleware cookie)
+      clearAuthStorage();
 
       // Redirect to login
       window.location.href = '/auth/login';
@@ -133,34 +139,54 @@ export const signIn = mockAuthClient.signIn;
 export const signUp = mockAuthClient.signUp;
 export const signOut = mockAuthClient.signOut;
 
-// Compatibility exports for useSession hook
-export const useSession = () => {
-  // Check if we're in the browser (client-side)
-  if (typeof window === 'undefined') {
-    return {
-      data: null,
-      isPending: true,
-      error: null,
-      status: 'loading'
-    };
-  }
+// Reactive session hook. MUST be a real hook (useState/useEffect): the old
+// synchronous version returned `isPending: true` during SSR and `false` on
+// the client's first render, so the root page's Initialization_Status card
+// never matched between server and client — a hydration mismatch that left
+// the card stuck on screen until a hard refresh.
+interface SessionState {
+  data: { user: unknown; token: string } | null;
+  isPending: boolean;
+  error: Error | null;
+  status: 'loading' | 'authenticated' | 'unauthenticated';
+}
 
-  const token = localStorage.getItem('auth_token');
-  const userData = localStorage.getItem('user');
-
-  let user = null;
-  if (userData) {
-    try {
-      user = JSON.parse(userData);
-    } catch (e) {
-      console.error('Failed to parse user data:', e);
-    }
-  }
-
-  return {
-    data: token ? { user, token } : null,
-    isPending: false,
+export const useSession = (): SessionState => {
+  // Same initial value on server AND client first render → hydration matches.
+  const [state, setState] = useState<SessionState>({
+    data: null,
+    isPending: true,
     error: null,
-    status: token ? 'authenticated' : 'unauthenticated'
-  };
+    status: 'loading',
+  });
+
+  useEffect(() => {
+    const read = () => {
+      const token = localStorage.getItem('auth_token');
+      if (token && !isTokenExpired(token)) {
+        let user = null;
+        const userData = localStorage.getItem('user');
+        if (userData) {
+          try {
+            user = JSON.parse(userData);
+          } catch (e) {
+            console.error('Failed to parse user data:', e);
+          }
+        }
+        setState({ data: { user, token }, isPending: false, error: null, status: 'authenticated' });
+      } else {
+        setState({ data: null, isPending: false, error: null, status: 'unauthenticated' });
+      }
+    };
+
+    read();
+    // Another tab signed out / signed in — stay in sync.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === 'auth_token') read();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  return state;
 };

@@ -13,7 +13,6 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     ports:
       - "5432:5432"
     networks:
@@ -59,6 +58,14 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000}
       - DATABASE_SSL_MODE=require
       - LOG_LEVEL=INFO
+      # Qdrant (Cloud in prod; empty URL falls back to localhost:6333)
+      - QDRANT_URL=${QDRANT_URL:-http://localhost:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - RAG_COLLECTION=${RAG_COLLECTION:-todo_documents}
+      # Embeddings: onnx (local 384-dim) | openrouter (Nemotron 2048-dim via OpenRouter)
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-onnx}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_EMBED_MODEL=${OPENROUTER_EMBED_MODEL:-nvidia/nemotron-3-embed-1b:free}
     volumes:
       - ./backend/logs:/app/logs
     ports:
@@ -86,7 +93,6 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_BASE_URL=${FRONTEND_URL:-http://localhost:3000}
-      - NEXT_PUBLIC_API_BASE_URL=${BACKEND_URL:-http://backend:8000}/api
       - NEXT_PUBLIC_BACKEND_URL=${BACKEND_URL:-http://backend:8000}
     ports:
       - "3000:3000"

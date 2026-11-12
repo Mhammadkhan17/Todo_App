@@ -9,13 +9,12 @@ from fastapi.testclient import TestClient
 
 
 def test_root_endpoint(client: TestClient):
-    """Test root endpoint."""
+    """Test root endpoint serves the HTML gateway page."""
     response = client.get("/")
     assert response.status_code == 200
-
-    data = response.json()
-    assert data["status"] == "ok"
-    assert "Todo API is running" in data["message"]
+    assert "text/html" in response.headers["content-type"]
+    assert "Todo API Backend Online" in response.text
+    assert "./api/docs" in response.text
 
 
 def test_health_check_endpoint(client: TestClient):

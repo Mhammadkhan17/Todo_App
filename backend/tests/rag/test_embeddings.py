@@ -1,9 +1,11 @@
 import pytest
 
 from src.rag.embeddings import (
-    EMBEDDING_DIM,
+    DEFAULT_OPENROUTER_MODEL,
     MODEL_DIR,
+    ONNX_EMBEDDING_DIM,
     OnnxMiniLMEmbeddings,
+    OpenRouterEmbeddings,
     l2_normalize,
     mean_pool,
 )
@@ -57,6 +59,19 @@ def test_real_embedding_shape_and_determinism():
     emb = OnnxMiniLMEmbeddings()
     v1 = emb.embed_query("buy groceries tomorrow")
     v2 = emb.embed_query("buy groceries tomorrow")
-    assert len(v1) == EMBEDDING_DIM
+    assert len(v1) == ONNX_EMBEDDING_DIM
     assert v1 == v2
     assert abs(sum(x * x for x in v1) - 1.0) < 1e-4
+
+
+def test_openrouter_requires_api_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        OpenRouterEmbeddings()
+
+
+def test_openrouter_defaults_to_free_nemotron(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.delenv("OPENROUTER_EMBED_MODEL", raising=False)
+    emb = OpenRouterEmbeddings()
+    assert emb.model == DEFAULT_OPENROUTER_MODEL

@@ -23,7 +23,7 @@ class CORSSecurity:
 
         if allowed_origins_str:
             # Parse comma-separated origins
-            origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+            origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
             return origins
         else:
             # Default to localhost in development
@@ -35,10 +35,14 @@ class CORSSecurity:
                     "http://127.0.0.1:8000"
                 ]
             else:
-                # In production, require explicit configuration
-                raise ValueError(
-                    "ALLOWED_ORIGINS must be explicitly configured in production environment"
+                # Production bootstrap: allow deploy before secrets are configured.
+                # CORS will block browser cross-origin requests until ALLOWED_ORIGINS is set.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "ALLOWED_ORIGINS is not set in production; using empty allowlist "
+                    "(configure ALLOWED_ORIGINS to enable browser CORS)."
                 )
+                return []
 
     @staticmethod
     def is_origin_allowed(origin: str) -> bool:

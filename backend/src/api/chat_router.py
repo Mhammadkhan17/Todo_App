@@ -10,13 +10,15 @@ from ..models.user import User
 from ..models.rag import ChatSession, ChatMessage
 from ..database.engine import database_engine
 from ..dependencies.auth import get_current_user
-from ..agents.todo_agent import call_mcp_tool
+from ..agents.todo_agent import process_natural_language_command
+from ..rag.guards import (
+    INJECTION_BLOCK_MESSAGE,
+    detect_injection,
+    sanitize_output,
+)
 import uuid
 from datetime import datetime
-import json
-import openai
 from dotenv import load_dotenv
-from ..llm.provider import resolve_llm
 
 load_dotenv()
 
@@ -87,208 +89,17 @@ def extract_todo_operations(message: str) -> List[Dict]:
     return operations
 
 
-async def process_with_openai_and_mcp(user_id: str, message: str, history: List[Dict[str, str]] = []) -> Dict[str, Any]:
+async def process_with_openai_and_mcp(
+    user_id: str,
+    message: str,
+    history: List[Dict[str, str]] | None = None,
+) -> Dict[str, Any]:
     """
-    Process the natural language message using OpenAI or Gemini with MCP tool integration.
-    Includes conversation history for context.
+    Async wrapper around todo_agent.process_natural_language_command,
+    the shared LLM + MCP tool-calling implementation (kept under this
+    name for the /api/chat endpoint and its tests).
     """
-    try:
-        # Get AI configuration
-        cfg = resolve_llm()
-        ai_provider, api_key, model = cfg.provider, cfg.api_key, cfg.model
-
-        if not api_key or api_key == "sk-dummy-key-for-development":
-            # Return a mock response if using dummy API key
-            return {
-                "response": f"Chatbot is working! However, {ai_provider.upper()} API key is not configured. Please set a valid API key in environment variables.",
-                "tool_calls": [],
-                "results": []
-            }
-
-        # Initialize OpenAI-compatible client
-        client = openai.OpenAI(api_key=api_key, base_url=cfg.base_url, default_headers=cfg.default_headers or None)
-
-        # Prepare the tools for function calling
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "add_task",
-                    "description": "Create a new task with title and optional description",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "string", "description": "User ID"},
-                            "title": {"type": "string", "description": "Task title"},
-                            "description": {"type": "string", "description": "Task description (optional)"}
-                        },
-                        "required": ["user_id", "title"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_tasks",
-                    "description": "Retrieve tasks from the list with optional status filter",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "string", "description": "User ID"},
-                            "status": {"type": "string", "description": "Filter by status: 'all', 'pending', 'completed' (optional)"}
-                        },
-                        "required": ["user_id"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "complete_task",
-                    "description": "Mark a task as complete by task_id",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "string", "description": "User ID"},
-                            "task_id": {"type": "integer", "description": "Task ID to mark as complete"}
-                        },
-                        "required": ["user_id", "task_id"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_task",
-                    "description": "Remove a task from the list by task_id",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "string", "description": "User ID"},
-                            "task_id": {"type": "integer", "description": "Task ID to delete"}
-                        },
-                        "required": ["user_id", "task_id"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "update_task",
-                    "description": "Modify task title or description by task_id",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_id": {"type": "string", "description": "User ID"},
-                            "task_id": {"type": "integer", "description": "Task ID to update"},
-                            "title": {"type": "string", "description": "New task title (optional)"},
-                            "description": {"type": "string", "description": "New task description (optional)"}
-                        },
-                        "required": ["user_id", "task_id"]
-                    }
-                }
-            }
-        ]
-
-        # Create the messages array with system prompt
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a friendly and proactive Task Management Assistant for TodoFlow. "
-                          "Your goal is to help users stay organized without overwhelming them with technical details. "
-                          "\n\nCRITICAL BEHAVIOR:\n"
-                          "1. If a user refers to a task by name/title (e.g., 'I finished the fish task'), DO NOT ask for an ID. "
-                          "Instead, call `list_tasks` first to find the ID yourself, then proceed with the action.\n"
-                          "2. You can call multiple tools in a single turn if the user has multiple requests.\n"
-                          "3. When listing tasks:\n"
-                          "   - Group them by status (e.g., 'Active', 'Completed').\n"
-                          "   - Don't show raw technical data like IDs unless specifically asked.\n"
-                          "   - Use a natural, conversational tone.\n"
-                          "4. Always confirm what you've done clearly."
-            }
-        ]
-        
-        # Add history
-        messages.extend(history)
-        
-        # Add the new user message with User ID context
-        messages.append({
-            "role": "user",
-            "content": f"[User Context: user_id={user_id}] {message}"
-        })
-
-        # Call the API with function calling
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto"
-        )
-
-        # Process the response
-        response_message = response.choices[0].message
-        tool_calls = response_message.tool_calls
-
-        results = []
-        formatted_tool_calls = []
-
-        if tool_calls:
-            # Execute the tool calls
-            for tool_call in tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-
-                # Add user_id if not present in the arguments
-                if "user_id" not in function_args:
-                    function_args["user_id"] = user_id
-
-                # Call the appropriate MCP tool
-                result = call_mcp_tool(function_name, function_args)
-                results.append(result)
-
-                formatted_tool_calls.append({
-                    "tool_name": function_name,
-                    "tool_input": function_args,
-                    "result": result
-                })
-
-        # Generate the final response
-        if results:
-            # If there were tool calls, generate a response based on the results
-            final_response = client.chat.completions.create(
-                model=model,
-                messages=messages + [
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": tool_calls
-                    }
-                ] + [
-                    {
-                        "role": "tool",
-                        "content": json.dumps(result),
-                        "tool_call_id": tool_call.id
-                    }
-                    for tool_call, result in zip(tool_calls, results)
-                ]
-            )
-
-            response_text = final_response.choices[0].message.content or "I have processed your request and updated your tasks accordingly."
-        else:
-            # If no tool calls were made, use the initial response
-            response_text = response_message.content or "I processed your request but didn't need to make any changes to your tasks."
-
-        return {
-            "response": response_text,
-            "tool_calls": formatted_tool_calls,
-            "results": results
-        }
-
-    except Exception as e:
-        return {
-            "error": str(e),
-            "response": f"I encountered an error processing your request: {str(e)}"
-        }
+    return process_natural_language_command(user_id, command=message, history=history)
 
 
 @router.post("", response_model=ChatResponse)
@@ -306,6 +117,17 @@ async def chat_endpoint(
     - Uses MCP tools for task operations
     """
     try:
+        # Deterministic input guard: refuse known injection payloads (OWASP
+        # LLM01) without ever calling the LLM.
+        if detect_injection(request.message):
+            return ChatResponse(
+                conversation_id=str(request.conversation_id)
+                if request.conversation_id
+                else str(uuid.uuid4()),
+                response=INJECTION_BLOCK_MESSAGE,
+                tool_calls=[],
+            )
+
         # Create or retrieve conversation ID
         conversation_id = str(request.conversation_id) if request.conversation_id else str(uuid.uuid4())
         history_to_pass = []
@@ -365,6 +187,9 @@ async def chat_endpoint(
         else:
             response_text = result.get("response", "Operation completed successfully.")
             formatted_tool_calls = result.get("tool_calls", [])
+
+        # Deterministic output guard against prompt leakage (OWASP LLM07)
+        response_text = sanitize_output(response_text)
 
         # Store assistant response in database
         with database_engine.get_session() as db:

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // Define protected routes that require authentication
-const protectedRoutes = ['/dashboard', '/profile', '/settings', '/tasks'];
+const protectedRoutes = ['/dashboard', '/profile', '/settings', '/tasks', '/stats', '/chat'];
 
 export function proxy(request: NextRequest) {
   // Check if the current route is protected

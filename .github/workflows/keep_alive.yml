@@ -1,0 +1,38 @@
+name: Keep Hugging Face Space Awake
+
+on:
+  schedule:
+    # Every 30 minutes, 24/7
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send keep-alive HTTP request
+        env:
+          # Preferred: full health URL, e.g. https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space/api/v1/health
+          HF_SPACE_HEALTH_URL: ${{ secrets.HF_SPACE_HEALTH_URL || vars.HF_SPACE_HEALTH_URL || '' }}
+          HF_SPACE_URL: ${{ vars.HF_SPACE_URL || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${HF_SPACE_HEALTH_URL}" ]; then
+            URL="${HF_SPACE_HEALTH_URL}"
+          elif [ -n "${HF_SPACE_URL}" ]; then
+            URL="${HF_SPACE_URL%/}/api/v1/health"
+          else
+            echo "::error::Set HF_SPACE_HEALTH_URL (secret/var) or HF_SPACE_URL (var), e.g. https://USERNAME-SPACE.hf.space"
+            exit 1
+          fi
+
+          echo "Pinging backend at $URL..."
+          RESPONSE=$(curl -sS -m 60 -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+
+          if [ "$RESPONSE" -eq 200 ]; then
+            echo "Success: Backend is alive (HTTP 200)."
+          else
+            echo "Warning: Received HTTP $RESPONSE. Space may be sleeping, building, or misconfigured."
+          fi

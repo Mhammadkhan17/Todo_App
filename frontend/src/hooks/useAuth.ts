@@ -24,9 +24,17 @@ export function useAuth(): UseAuthReturn {
   const router = useRouter();
 
   // Use the new AuthContext
-  const { user, token, loading, login: contextLogin, register: contextRegister, logout: contextLogout } = useNewAuth();
+  const {
+    user,
+    loading,
+    isAuthenticated,
+    login: contextLogin,
+    register: contextRegister,
+    logout: contextLogout,
+  } = useNewAuth();
 
-  const isAuthenticated = !!token && !loading;
+  // Expiry-aware flag from the context (not `!!token`): an expired token
+  // must read as signed-out so page gates redirect immediately.
 
   const login = async (credentials: { email: string; password: string }) => {
     setIsLoading(true);
