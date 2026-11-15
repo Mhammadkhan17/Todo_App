@@ -17,7 +17,7 @@ FastAPI backend (auth, tasks, chat, RAG) wrapped with **Gradio** for Hugging Fac
 
 - **SDK:** Gradio (`gr.mount_gradio_app` over FastAPI)
 - **App:** `main.py` (`app` exposed for Gradio/ASGI)
-- **Health:** `GET /health` and `GET /api/v1/health` (keep-alive ping)
+- **Health:** `GET /health` (keep-alive ping)
 
 ## Required Space Secrets / Variables
 
@@ -48,7 +48,7 @@ Set these in **Space Settings → Variables and secrets**:
 
 - Admin/Gateway UI: `/` (Gradio)
 - Docs: `/api/docs`
-- Health: `/health`, `/api/v1/health`
+- Health: `/health`
 - Auth: `/api/register`, `/api/token`, `/api/me`
 - Tasks: `/api/{user_id}/tasks`
 - Chat: `/api/chat`

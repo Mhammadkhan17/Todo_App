@@ -14,7 +14,7 @@ jobs:
     steps:
       - name: Send keep-alive HTTP request
         env:
-          # Preferred: full health URL, e.g. https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space/api/v1/health
+          # Preferred: full health URL, e.g. https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space/health
           HF_SPACE_HEALTH_URL: ${{ secrets.HF_SPACE_HEALTH_URL || vars.HF_SPACE_HEALTH_URL || '' }}
           HF_SPACE_URL: ${{ vars.HF_SPACE_URL || '' }}
         run: |
@@ -22,7 +22,7 @@ jobs:
           if [ -n "${HF_SPACE_HEALTH_URL}" ]; then
             URL="${HF_SPACE_HEALTH_URL}"
           elif [ -n "${HF_SPACE_URL}" ]; then
-            URL="${HF_SPACE_URL%/}/api/v1/health"
+            URL="${HF_SPACE_URL%/}/health"
           else
             echo "::error::Set HF_SPACE_HEALTH_URL (secret/var) or HF_SPACE_URL (var), e.g. https://USERNAME-SPACE.hf.space"
             exit 1
