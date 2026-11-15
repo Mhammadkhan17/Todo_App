@@ -150,7 +150,7 @@ backend/.venv/bin/python scripts/fetch_embeddings_model.py
 
 Without an AI provider key, RAG endpoints still index and search documents but chat returns a graceful "not configured" reply. Without the fetched model, upload indexing fails and the two embedding tests skip.
 
-> **Note:** the full Docker dev stack (`docker-compose build backend`) currently fails because of a build-target mismatch. Running the two apps locally as above is the supported path today.
+> **Note:** `backend/Dockerfile` and `backend/.dockerignore` were removed — this repo doesn't containerize the apps (the HF Space runs the Gradio SDK; local dev runs `uvicorn`/`next` directly). `docker-compose.yml` remains only for infrastructure services (Postgres, Qdrant, Redis).
 
 ## Usage
 
@@ -299,7 +299,6 @@ Every row below is a known, documented issue — check here before opening one.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | Backend refuses to start, or `pytest` errors immediately | No reachable PostgreSQL (the app checks at startup) | `docker-compose up -d postgres`, or point `DATABASE_URL` at any reachable database (e.g. Neon) |
-| `docker-compose build backend` fails | Compose targets `development`, but `backend/Dockerfile` only defines `builder` and `production` stages | Run the two apps locally per the [Quickstart](#quickstart) — that is the supported path |
 | Chat replies "not configured" | No AI provider credentials set | Set `AI_PROVIDER` plus `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` (see [Configuration](#configuration)) |
 | Embedding tests skip / upload indexing fails with a missing model | ONNX weights not fetched (or `onnxruntime`/`tokenizers` not installed) | `backend/.venv/bin/python scripts/fetch_embeddings_model.py` and `pip install -r backend/requirements.txt` |
 | Upload succeeds but chat answers ignore the file | No AI provider key, so chat returns the "not configured" reply | Set an `AI_PROVIDER` + key (Quickstart step 6) |

@@ -60,7 +60,7 @@ The HF Space should contain **only the `backend/` directory contents** (this rep
 
 ## Notes
 
-- `Dockerfile`/`.dockerignore` are archived as `*.hf-docker.bak` (HF Docker build not used on free Gradio tier).
+- `Dockerfile`/`.dockerignore` were removed from the repo (HF Docker build not used on the free Gradio tier; local dev runs `uvicorn` directly). A local-only archive exists as `Dockerfile.hf-docker.bak`.
 - Heavy deps (LangChain/RAG) increase build time and cold-start risk on free CPU. ONNX (`onnxruntime`, `tokenizers`, model weights) is only needed for local `EMBEDDING_PROVIDER=onnx` dev; the Space runs `EMBEDDING_PROVIDER=openrouter` and never loads it.
 - **Storage:** your **Neon Postgres** is cloud DB storage and is fine. The “ephemeral” issue is only **local filesystem** used by RAG uploads (`backend/data/uploads/` / `ALLOWED_DOCUMENT_PATH`) and any temp files on the Space — those are lost on restart/rebuild. Qdrant vectors also belong in **Qdrant Cloud** (external), not local Qdrant.
 - Qdrant is external: create a Qdrant Cloud cluster and set `QDRANT_URL` + `QDRANT_API_KEY` (collection `todo_documents` is auto-created on first use, 2048-dim when `EMBEDDING_PROVIDER=openrouter`).

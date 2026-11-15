@@ -18,7 +18,7 @@ Main branch: `main` (deploy branch — the former `deploy/hf-backend-test` test 
    # from repo root
    git subtree push --prefix backend https://huggingface.co/spaces/<username>/<space> main
    ```
-   Or clone the Space and copy `backend/*` into it (include `README.md` with HF YAML, `Dockerfile`, app code).
+   Or clone the Space and copy `backend/*` into it (include `README.md` with HF YAML and the app code).
 4. **CI/CD (GitHub Actions):** add repo secrets
    - `HF_TOKEN` — Hugging Face token with **write** access
    - `HF_SPACE_REPO` — `username/space-name`
