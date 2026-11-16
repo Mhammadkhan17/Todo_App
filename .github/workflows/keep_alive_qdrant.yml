@@ -1,0 +1,67 @@
+name: Keep Qdrant Cloud Cluster Awake
+
+on:
+  schedule:
+    # Twice a day (UTC) — free clusters suspend after 1 week without use,
+    # so even several missed runs stay far inside the window.
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping-qdrant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Qdrant cluster
+        env:
+          # Cluster HTTPS URL from the Qdrant Cloud console (Access → Overview),
+          # e.g. https://<cluster-id>.<region>.<provider>.qdrant.cloud:6333
+          QDRANT_URL: ${{ secrets.QDRANT_URL || vars.QDRANT_URL || '' }}
+          # Database API key (Cloud console → Access → API keys, type Database).
+          # NOT the Cloud Management Key.
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY || vars.QDRANT_API_KEY || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${QDRANT_URL:-}" ]; then
+            echo "::error::Set QDRANT_URL (Actions secret or repo variable), e.g. https://<cluster-id>.<region>.qdrant.cloud:6333"
+            exit 1
+          fi
+          if [ -z "${QDRANT_API_KEY:-}" ]; then
+            echo "::error::Set QDRANT_API_KEY as an Actions secret (Qdrant Cloud console → Access → API keys, type Database)"
+            exit 1
+          fi
+
+          # Canonical liveness request: GET the cluster root with the api-key header.
+          BODY_FILE="$(mktemp)"
+          RESPONSE="000"
+          RESPONSE="$(curl -sS -m 30 -o "$BODY_FILE" -w '%{http_code}' \
+            -H "api-key: ${QDRANT_API_KEY}" \
+            "${QDRANT_URL%/}/collections")" || RESPONSE="000"
+
+          echo "HTTP ${RESPONSE}"
+          cat "$BODY_FILE" || true
+          echo
+
+          case "$RESPONSE" in
+            200)
+              echo "Success: cluster awake (HTTP 200)."
+              ;;
+            401|403)
+              echo "::error::Auth failed (HTTP ${RESPONSE}) — check QDRANT_API_KEY (must be a Database key for this cluster)."
+              exit 1
+              ;;
+            404)
+              echo "::error::HTTP 404 — check QDRANT_URL (must be the cluster root, no path suffix)."
+              exit 1
+              ;;
+            000)
+              echo "::error::Cluster unreachable (connection failed)."
+              exit 1
+              ;;
+            *)
+              # 5xx / suspended-restarting states: the request still reached the
+              # cluster and counts as activity — warn but don't fail the run.
+              echo "::warning::HTTP ${RESPONSE} — request reached the cluster (counts as use); it may be booting."
+              ;;
+          esac
