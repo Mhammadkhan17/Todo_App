@@ -43,7 +43,7 @@ Free tier (single node, 1 GB) is enough for this app.
    - `EMBEDDING_PROVIDER=openrouter`
 5. Restart the Space. The backend auto-creates collection `todo_documents` (2048-dim COSINE with payload indexes) on first RAG call — verify it appears in the Qdrant Cloud dashboard after you upload a document.
 
-> Free-tier clusters **suspend after ~1 week idle** and are deleted after ~4 weeks of inactivity; re-runs boot automatically on access within that window. Vectors persist across suspend.
+> Free-tier clusters **suspend after 1 week without use** and are deleted 3 weeks after the suspension notice if not reactivated ([official billing docs](https://qdrant.tech/documentation/cloud-pricing-payments/)). A suspended cluster **can't serve requests** — reactivate it in the Qdrant Cloud Console (**Reactivate**), via `qcloud cluster unsuspend`, or the Cloud API (`POST /clusters/<id>/unsuspend`); database requests do **not** boot it automatically. Vectors persist across suspension. The `keep_alive_qdrant.yml` workflow pings the cluster every 12h (a 1-point scroll on the app's collection) to prevent suspension.
 
 Qdrant **local Docker** stays the dev default (`QDRANT_URL=http://localhost:6333`, no key) — see `docker-compose.yml`.
 

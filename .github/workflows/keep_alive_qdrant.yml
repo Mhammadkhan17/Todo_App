@@ -16,15 +16,17 @@ jobs:
       - name: Ping Qdrant cluster
         env:
           # Cluster HTTPS URL from the Qdrant Cloud console (Access → Overview),
-          # e.g. https://<cluster-id>.<region>.<provider>.qdrant.cloud:6333
+          # e.g. https://<cluster-id>.<region>.<provider>.cloud.qdrant.io
           QDRANT_URL: ${{ secrets.QDRANT_URL || vars.QDRANT_URL || '' }}
           # Database API key (Cloud console → Access → API keys, type Database).
           # NOT the Cloud Management Key.
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY || vars.QDRANT_API_KEY || '' }}
+          # Same collection the app uses (repo variable or default).
+          RAG_COLLECTION: ${{ vars.RAG_COLLECTION || secrets.RAG_COLLECTION || 'todo_documents' }}
         run: |
           set -euo pipefail
           if [ -z "${QDRANT_URL:-}" ]; then
-            echo "::error::Set QDRANT_URL (Actions secret or repo variable), e.g. https://<cluster-id>.<region>.qdrant.cloud:6333"
+            echo "::error::Set QDRANT_URL (Actions secret or repo variable), e.g. https://<cluster-id>.<region>.<provider>.cloud.qdrant.io"
             exit 1
           fi
           if [ -z "${QDRANT_API_KEY:-}" ]; then
@@ -32,20 +34,39 @@ jobs:
             exit 1
           fi
 
-          # Canonical liveness request: GET the cluster root with the api-key header.
+          BASE="${QDRANT_URL%/}"
           BODY_FILE="$(mktemp)"
-          RESPONSE="000"
-          RESPONSE="$(curl -sS -m 30 -o "$BODY_FILE" -w '%{http_code}' \
-            -H "api-key: ${QDRANT_API_KEY}" \
-            "${QDRANT_URL%/}/collections")" || RESPONSE="000"
 
-          echo "HTTP ${RESPONSE}"
+          ping() {
+            # $1.. = curl args; echoes http code, body printed by caller
+            RESPONSE="000"
+            RESPONSE="$(curl -sS -m 30 -o "$BODY_FILE" -w '%{http_code}' \
+              -H "api-key: ${QDRANT_API_KEY}" "$@")" || RESPONSE="000"
+            echo "$RESPONSE"
+          }
+
+          # 1) Preferred: a real data-plane read (1-point scroll on the app's
+          #    collection) so "use" counts under any definition — any-request
+          #    or actual ingestion/retrieval activity.
+          RESPONSE="$(ping -X POST -H 'Content-Type: application/json' \
+            -d '{"limit":1,"with_payload":false,"with_vector":false}' \
+            "${BASE}/collections/${RAG_COLLECTION}/points/scroll")"
+          KIND="scroll on '${RAG_COLLECTION}'"
+
+          if [ "$RESPONSE" = "404" ]; then
+            # Collection not created yet — fall back to the documented
+            # root-URL access test (still an authenticated API request).
+            RESPONSE="$(ping "${BASE}/collections")"
+            KIND="root /collections (collection '${RAG_COLLECTION}' not found yet)"
+          fi
+
+          echo "Ping: ${KIND} -> HTTP ${RESPONSE}"
           cat "$BODY_FILE" || true
           echo
 
           case "$RESPONSE" in
             200)
-              echo "Success: cluster awake (HTTP 200)."
+              echo "Success: cluster active (HTTP 200)."
               ;;
             401|403)
               echo "::error::Auth failed (HTTP ${RESPONSE}) — check QDRANT_API_KEY (must be a Database key for this cluster)."
@@ -56,12 +77,12 @@ jobs:
               exit 1
               ;;
             000)
-              echo "::error::Cluster unreachable (connection failed)."
+              echo "::error::Cluster unreachable. If it was suspended, reactivate it in the Qdrant Cloud Console (Reactivate), via 'qcloud cluster unsuspend', or the Cloud API — a suspended cluster cannot serve requests."
               exit 1
               ;;
             *)
-              # 5xx / suspended-restarting states: the request still reached the
-              # cluster and counts as activity — warn but don't fail the run.
+              # 5xx / booting states: the request still reached the cluster
+              # and counts as use — warn but don't fail the run.
               echo "::warning::HTTP ${RESPONSE} — request reached the cluster (counts as use); it may be booting."
               ;;
           esac
